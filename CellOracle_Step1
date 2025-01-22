@@ -24,11 +24,6 @@ sc.settings.set_figure_params(dpi=600, facecolor='white')
 import pandas as pd
 import scanpy as sc
 
-#the following files were downloaded
-#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fcell%5Fmetadata.txt.gz
-#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fcluster%5Fnames.txt.gz
-#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Frna%5Fcounts.tsv.gz
-
 # File paths
 counts_path = 'GSE162170_multiome_rna_counts.tsv'
 cluster_path = 'GSE162170_multiome_cluster_names.txt'
@@ -476,6 +471,7 @@ print( set(G1S_genes_Tirosh + G2M_genes_Tirosh) - set(cell_cycle_genes) )
 print( set(G1S_genes_Tirosh + G2M_genes_Tirosh) &  set(adata.var.index) )
 
 sc.tl.score_genes_cell_cycle(adata, s_genes=s_genes, g2m_genes=g2m_genes)
+import seaborn as sns
 
 phase_threshold = 0
 v1 = adata.obs[ 'S_score']
@@ -497,6 +493,31 @@ plt.ylabel('Scanpy G2M', fontsize = 20 )
 
 
 plt.show()
+
+threshold = 1.0
+
+# Ensure 'SOX2' and 'VIM' are in adata_old.var_names
+if "SOX2" not in adata.var_names or "VIM" not in adata.var_names:
+    raise ValueError("Both 'SOX2' and 'VIM' must be present in adata_old.var_names.")
+
+# Extract the expression values for SOX2 and VIM.
+# If needed, replace 'X' with the appropriate layer or consider using normalized values from adata_old.layers.
+sox2_expr = adata[:, "SOX2"].X
+vim_expr = adata[:, "VIM"].X
+
+# Since X can be a sparse matrix, it's safer to convert to a dense array if needed:
+# (If your data is large, consider working with sparse logic or summarize differently)
+sox2_expr = sox2_expr.toarray().flatten() if hasattr(sox2_expr, 'toarray') else sox2_expr
+vim_expr = vim_expr.toarray().flatten() if hasattr(vim_expr, 'toarray') else vim_expr
+
+# Identify RG cells: those that express both SOX2 and VIM above the threshold
+rg_cells = (sox2_expr > threshold) & (vim_expr > threshold)
+
+# Update the celltype for these cells. Cells not meeting the criteria remain as is.
+adata.obs.loc[rg_cells, 'celltype'] = "RG"
+
+adata.obs['celltype'] = adata.obs['celltype'].astype(str)
+
 
 
 adata_old = sc.read_h5ad("updated_data_with_celltype.h5ad")
@@ -552,30 +573,6 @@ adata_old.obs['G2M_score'] = celltype_series_aligned
 adata_old = adata_old[adata_old.obs['G2M_score'].notna()].copy()
 
 
-# Define a threshold. Adjust this based on the scale of your data.
-threshold = 1.0
-
-# Ensure 'SOX2' and 'VIM' are in adata_old.var_names
-if "SOX2" not in adata_old.var_names or "VIM" not in adata_old.var_names:
-    raise ValueError("Both 'SOX2' and 'VIM' must be present in adata_old.var_names.")
-
-# Extract the expression values for SOX2 and VIM.
-# If needed, replace 'X' with the appropriate layer or consider using normalized values from adata_old.layers.
-sox2_expr = adata_old[:, "SOX2"].X
-vim_expr = adata_old[:, "VIM"].X
-
-# Since X can be a sparse matrix, it's safer to convert to a dense array if needed:
-# (If your data is large, consider working with sparse logic or summarize differently)
-sox2_expr = sox2_expr.toarray().flatten() if hasattr(sox2_expr, 'toarray') else sox2_expr
-vim_expr = vim_expr.toarray().flatten() if hasattr(vim_expr, 'toarray') else vim_expr
-
-# Identify RG cells: those that express both SOX2 and VIM above the threshold
-rg_cells = (sox2_expr > threshold) & (vim_expr > threshold)
-
-# Update the celltype for these cells. Cells not meeting the criteria remain as is.
-adata_old.obs.loc[rg_cells, 'celltype'] = "RG"
-
-adata_old.obs['celltype'] = adata_old.obs['celltype'].astype(str)
 adata_old.write('updated_data_with_celltype_phase_redone.h5ad')
 
 #### NOW RUN THE R CODE TO RENAME THE VIM+SOX2+ CELLS AS RGS
@@ -622,7 +619,7 @@ sc.tl.pca(adata, svd_solver='arpack')
 
 # Diffusion map
  # Compute the neighborhood graph if not already done
-sc.pp.neighbors(adata, n_neighbors=20, n_pcs=10)
+sc.pp.neighbors(adata, n_neighbors=7, n_pcs=7)
 sc.tl.diffmap(adata)
 # Calculate neihbors again based on diffusionmap
 
@@ -640,12 +637,13 @@ sc.tl.paga(adata, groups='celltype')
 plt.rcParams["figure.figsize"] = [6, 4.5]
 sc.pl.paga(adata)
 
-sc.tl.draw_graph(adata, init_pos='paga', random_state=123)
-sc.pl.draw_graph(adata, color='EOMES')
+sc.tl.draw_graph(adata, init_pos='X_umap', random_state=123)
+sc.pl.draw_graph(adata, color='JUNB')
 sc.pl.draw_graph(adata, color='celltype')
 
 
-adata.write_h5ad("Trevino_Final_reannotated_phase_celloracle_3000_redone.h5ad")
+adata.write_h5ad("Trevino_Final_reannotated_phase_celloracle_3000_redone_v3.h5ad")
+adata = sc.read_h5ad("Trevino_Final_reannotated_phase_celloracle_3000_redone_v3.h5ad")
 
 
 import copy
@@ -746,7 +744,7 @@ except:
     print("Plotly not found in your environment. Did you install plotly? Please read the instruction above.")
 
 # Estimated root cell name for each lineage
-root_cells = {"Lineage_Diff": "hft_ctx_w21_dc1r3_r1_GGTACAAAGTAAGGGC"}
+root_cells = {"Lineage_Diff": "hft_ctx_w21_dc2r2_r1_CCCTCAGTCTTGAGCG"}
 pt.set_root_cells(root_cells=root_cells)
 
 
@@ -766,9 +764,9 @@ pt.adata.obs[["Pseudotime"]].head()
 adata.obs = pt.adata.obs
 
 # Save updated anndata object
-adata.write_h5ad("Final_celloracle.h5ad")
+adata.write_h5ad("Final_celloracle_v2.h5ad")
 
-adata = sc.read_h5ad("Final_celloracle.h5ad")
+adata = sc.read_h5ad("Final_celloracle_v2.h5ad")
 
 
 
@@ -799,9 +797,6 @@ bed_df = bed_df.rename(columns={'seqnames': 'chrom'})
 bed_df.to_csv(output_bed_file, sep='\t', header=False, index=False)
 
 print(f"BED file saved to {output_bed_file}")
-
-#Download this file for consensus binding peaks
-#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fatac%5Fconsensus%5Fpeaks.txt.gz
 
 # Load bed_file
 file_path_of_bed_file = "GSE162170_multiome_atac_consensus_peaks.bed"
@@ -946,11 +941,10 @@ tfi.scan(fpr=0.02,
 
 # Save tfinfo object
 tfi.to_hdf5(file_path="test1.celloracle.tfinfo")
+tfi = co.load_hdf5("test1.celloracle.tfinfo")
 # Check motif scan results
 tfi.scanned_df.head()
-
 tfi.scanned_df.to_csv("base_GRN_dataframe_filtered_scanned.csv")
-
 
 # Reset filtering
 tfi.reset_filtering()
