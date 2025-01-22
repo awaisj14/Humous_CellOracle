@@ -1,3 +1,41 @@
+import copy
+import glob
+import time
+import os
+import shutil
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+from tqdm.auto import tqdm
+
+
+
+import os, sys, shutil, importlib, glob
+from tqdm.notebook import tqdm
+
+#install bedtools2 in your conda environment
+#git clone https://github.com/arq5x/bedtools2.git
+#cd bedtools2
+#make clean; make all
+#bin/bedtools --version
+#bedtools v2.20.1-4-gb877b35
+
+
+#import time
+import velocyto
+import celloracle as co
+from celloracle.applications import Pseudotime_calculator
+co.__version__
+
+from celloracle import motif_analysis as ma
+import celloracle as co
+co.__version__
+
+from pybedtools import BedTool
 
 
 # Download this file: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE241nnn/GSE241429/suppl/GSE241429%5Fmouse%5FscMultiome%5Fpeak.bed.gz
