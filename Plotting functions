@@ -1,0 +1,2424 @@
+import os
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+
+import celloracle as co
+co.__version__
+# visualization settings
+%config InlineBackend.figure_format = 'retina'
+%matplotlib inline
+
+plt.rcParams['figure.figsize'] = [6, 4.5]
+plt.rcParams["savefig.dpi"] = 300
+save_folder = "figures"
+os.makedirs(save_folder, exist_ok=True)
+
+
+###### CLUSTERS
+adata = sc.read_h5ad("/Users/javed/Documents/Human_multiome/Celloracle/Final_celloracle_v2.h5ad")
+oracle = co.load_hdf5("Paul_15_data_v2.celloracle.oracle")
+links = co.load_hdf5("links_v2.celloracle.links")
+print(links)
+
+
+import matplotlib
+matplotlib.use('Agg')  # Use the non-interactive 'Agg' backend
+import matplotlib.pyplot as plt
+import scanpy as sc
+import numpy as np
+
+# Assuming 'adata' is already loaded and processed
+# Ensure 'celltype' is a categorical variable and reorder the categories
+desired_order = ['RG', 'IP', 'N']
+adata.obs['celltype'] = adata.obs['celltype'].astype('category')
+adata.obs['celltype'].cat.set_categories(desired_order, ordered=True, inplace=True)
+
+# Determine the number of unique clusters
+n_clusters = len(desired_order)
+
+# Create a palette of red shades from dark to light, excluding white
+cmap = plt.get_cmap('Reds_r')  # Reversed 'Reds' colormap for dark-to-light shades
+colors = [cmap(i) for i in np.linspace(0, 0.9, n_clusters)]  # Exclude the lightest reds
+
+# Plot using the custom palette
+sc.pl.draw_graph(adata, color='celltype', palette=colors,)
+
+# Save the plot as a PDF file
+plt.savefig('celltype.pdf', dpi=600, bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+import matplotlib
+matplotlib.use('Agg')  # Use the non-interactive 'Agg' backend
+import matplotlib.pyplot as plt
+import scanpy as sc
+import numpy as np
+
+# Assuming 'adata' is already loaded and processed
+# Determine the number of unique clusters in 'phase'
+categories = adata.obs['phase'].cat.categories
+n_clusters = len(categories)
+
+# Create a palette of blue shades from dark to light, excluding white
+cmap = plt.get_cmap('Blues_r')  # Reversed 'Blues' colormap for dark-to-light shades
+# Exclude the very lightest shade to avoid white
+colors = [cmap(i) for i in np.linspace(0, 0.9, n_clusters)]  # Use 0.9 instead of 1.0
+
+# Plot using the custom palette
+sc.pl.draw_graph(adata, color='phase', palette=colors)
+
+# Save the plot as a PDF file
+plt.savefig('phase.pdf', dpi=600, bbox_inches='tight')
+plt.close()  # Close the plot to free up memory##### PSUEDOTIME
+
+#alternative
+# Define the custom palette with the desired colors
+colors = ['#e7e1ef','#dd1c77', '#c994c7' ]  # Colors for the three clusters
+
+# Plot using the custom palette
+sc.pl.draw_graph(adata, color='phase', palette=colors)
+
+# Save the plot as a PDF file
+plt.savefig('phase.pdf', dpi=600, bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import scanpy as sc
+
+
+# Assuming 'adata' is already computed with sc.tl.draw_graph
+
+# Normalize 'Pseudotime' to range between 0 and 1
+adata.obs['Pseudotime_normalized'] = (adata.obs['Pseudotime'] - adata.obs['Pseudotime'].min()) / (adata.obs['Pseudotime'].max() - adata.obs['Pseudotime'].min())
+
+# Create a custom color map from #D2D4AB to #22518A
+cmap = mcolors.LinearSegmentedColormap.from_list("pseudotime_gradient", ["#D2D4AB", "#22518A"])
+
+# Get the graph layout coordinates
+coords = adata.obsm['X_draw_graph_fa']  # or the key corresponding to your layout
+
+# Apply the colormap to the normalized 'Pseudotime' values to get colors for each point
+point_colors = cmap(adata.obs['Pseudotime_normalized'])
+
+# Plotting
+plt.figure(figsize=(10, 6))
+plt.scatter(coords[:, 0], coords[:, 1], c=point_colors, s=20, edgecolor='none')
+
+# Optionally, create and add a colorbar
+plt.title('Graph layout colored by Pseudotime')
+plt.xlabel('Component 1')
+plt.ylabel('Component 2')
+plt.show()
+plt.savefig('Pseudotime.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+
+
+
+
+
+
+####### EXPRESSION OF GRN GENES IN PHASES #######
+oracle = co.load_hdf5("Paul_15_data_v2.celloracle.oracle")
+import pandas as pd
+import scipy.sparse
+
+# Define genes of interest in uppercase
+genes_of_interest = ['PTN', 'GLI3', 'CREB5', 'CELF2', 'KIF15', 'SEMA6D', 'JUNB']
+
+# Filter for 'RG' cells
+rg_cells = oracle.adata.obs['celltype'] == 'RG'
+cell_names = oracle.adata.obs.index[rg_cells]  # Extract cell names
+
+# Ensure genes exist in AnnData
+valid_genes = [gene for gene in genes_of_interest if gene in oracle.adata.var_names]
+
+# Function to extract data from a specific layer and save as CSV
+def save_expression_data(layer_name, file_name):
+    if layer_name in oracle.adata.layers:
+        # Extract expression values from the layer
+        expression_data = oracle.adata[rg_cells, valid_genes].layers[layer_name]
+        
+        # Convert sparse matrix to dense if needed
+        if isinstance(expression_data, scipy.sparse.spmatrix):
+            expression_data = expression_data.toarray()
+        
+        # Create DataFrame with cell names as the first column
+        df = pd.DataFrame(expression_data, columns=valid_genes, index=cell_names)
+        
+        # Add the phase annotation
+        df['phase'] = oracle.adata.obs.loc[rg_cells, 'phase'].values
+        
+        # Save as CSV
+        df.to_csv(file_name)
+        print(f"Saved: {file_name}")
+    else:
+        print(f"Layer '{layer_name}' not found in oracle.adata!")
+
+# Save raw, normalized, and imputed expression data
+save_expression_data("raw_count", "RG_raw_counts.csv")
+save_expression_data("normalized_count", "RG_normalized_counts.csv")
+save_expression_data("imputed_count", "RG_imputed_counts.csv")
+
+
+
+
+### EXPRESSION
+
+sc.pl.draw_graph(oracle.adata, color=["phase"],
+                 layer="raw_count", use_raw=False, cmap="viridis")
+plt.savefig('phase_expression_raw.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+#Alternative
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+
+# Define the custom colormap
+custom_cmap = LinearSegmentedColormap.from_list("custom_cmap", ["#E3EBF0", "#05508C"])
+
+# Plot the graph with the custom colormap
+sc.pl.draw_graph(
+    oracle.adata,
+    color=["JUNB"],
+    layer="imputed_count",
+    use_raw=False,
+    cmap=custom_cmap
+)
+
+# Save the plot
+plt.savefig('JUNB_expression.pdf', dpi=600, bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+sc.pl.draw_graph(oracle.adata, color=["CEBPD"],
+                 layer="imputed_count", use_raw=False, cmap="viridis")
+plt.savefig('CEBPD_expression.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+sc.pl.draw_graph(oracle.adata, color=["CSRNP1"],
+                 layer="imputed_count", use_raw=False, cmap="viridis")
+plt.savefig('CSRNP1_expression.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+sc.pl.draw_graph(oracle.adata, color=["GLIS3"],
+                 layer="imputed_count", use_raw=False, cmap="viridis")
+plt.savefig('GLIS3_expression.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+sc.pl.draw_graph(oracle.adata, color=["IRF1"],
+                 layer="imputed_count", use_raw=False, cmap="viridis")
+plt.savefig('IRF1_expression.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+sc.pl.draw_graph(oracle.adata, color=["EOMES"],
+                 layer="imputed_count", use_raw=False, cmap="viridis")
+plt.savefig('EOMES_expression.pdf', dpi=600,bbox_inches='tight')
+plt.close()  # Close the plot to free up memory
+
+
+
+
+TFF = ['Junb', 'Cebpd', 'Csrnp1','Glis3','Irf1']  
+
+
+import pandas as pd
+import os
+import plotly.graph_objects as go
+
+def read_data(file_path):
+    return pd.read_csv(file_path)
+
+# List of genes you provided
+TFF = ['JUNB', 'CEBPD', 'CSRNP1','GLIS3','IRF1']  
+
+def create_sankey_data(df, tfs):
+    # Filter the DataFrame to include only rows where 'target' is in tfs
+    df_filtered = df[df['target'].isin(tfs)]
+    
+    # Ensure that 'source' and 'target' are strings
+    df_filtered['source'] = df_filtered['source'].astype(str)
+    df_filtered['target'] = df_filtered['target'].astype(str)
+    
+    # Create a list of all unique nodes
+    nodes = list(set(df_filtered['source']).union(set(df_filtered['target'])))
+    node_indices = {node: i for i, node in enumerate(nodes)}
+    
+    # Create the links for the Sankey diagram
+    links = []
+    node_coef_mean = {}  # To store coef_mean per source node
+    for _, row in df_filtered.iterrows():
+        source = row['source']
+        target = row['target']
+        coef_mean = row['coef_mean']
+        logp = row['-logp']
+        
+        # Use absolute coef_mean as the flow value
+        value = abs(coef_mean)
+        
+        links.append({
+            'source': node_indices[source],
+            'target': node_indices[target],
+            'value': value,
+            'label': f"{source} → {target}",
+            'coef_mean': coef_mean,
+            'logp': logp
+        })
+        
+        # Accumulate coef_mean values for each source node
+        if source not in node_coef_mean:
+            node_coef_mean[source] = []
+        node_coef_mean[source].append(coef_mean)
+    
+    # Calculate average coef_mean for each source node
+    for node in node_coef_mean:
+        node_coef_mean[node] = sum(node_coef_mean[node]) / len(node_coef_mean[node])
+    
+    return nodes, links, node_coef_mean
+
+def draw_sankey(nodes, links, node_coef_mean, file_name, age, inj, tfs):
+    # Assign colors to nodes and set node positions
+    node_colors = []
+    node_x = []
+    node_y = []
+    for node in nodes:
+        if node in tfs:
+            node_colors.append('grey')  # Target genes in grey
+            node_x.append(0.9)          # Position target nodes on the right
+        elif node in node_coef_mean:
+            coef_mean = node_coef_mean[node]
+            if coef_mean > 0:
+                node_colors.append('red')      # Positive coef_mean
+            elif coef_mean < 0:
+                node_colors.append('lightblue')  # Negative coef_mean
+            else:
+                node_colors.append('white')    # Neutral or zero
+            node_x.append(0.1)                 # Position source nodes on the left
+        else:
+            node_colors.append('white')        # Nodes without coef_mean
+            node_x.append(0.5)                 # Position in the middle (if any)
+        node_y.append(0.5)  # Let Plotly arrange y positions automatically
+
+    # Create Sankey diagram
+    sankey = go.Sankey(
+        arrangement='snap',
+        node=dict(
+            pad=15,
+            thickness=20,
+            line=dict(color='black', width=0.5),
+            label=nodes,
+            color=node_colors,
+            x=node_x,  # Set x positions
+            # y=node_y,  # Let Plotly handle y positions
+            customdata=nodes,
+            hovertemplate='%{customdata}<extra></extra>',
+        ),
+        link=dict(
+            source=[link['source'] for link in links],
+            target=[link['target'] for link in links],
+            value=[link['value'] for link in links],
+            customdata=[f"coef_mean: {link['coef_mean']:.2f}, -logp: {link['logp']:.2f}" for link in links],
+            hovertemplate='%{source.label} → %{target.label}<br />%{customdata}<extra></extra>',
+            color='grey'
+        )
+    )
+    
+    fig = go.Figure(sankey)
+    fig.update_layout(
+        title_text=f"Regulators of {', '.join(tfs)} at {age} in {inj} identity neurons",
+        font_size=10,
+        width=800,
+        height=600,
+        # Remove x and y axis numbers and gridlines
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False),
+    )
+    
+    # Add custom legend
+    legend_labels = ['Positive coef_mean', 'Negative coef_mean', 'Target genes']
+    legend_colors = ['red', 'lightblue', 'grey']
+    for color, label in zip(legend_colors, legend_labels):
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            marker=dict(size=10, color=color),
+            legendgroup=label,
+            showlegend=True,
+            name=label
+        ))
+    
+    # Adjust layout to show the legend
+    fig.update_layout(
+        legend=dict(
+            orientation='v',
+            xanchor='left',
+            x=1.02,
+            yanchor='top',
+            y=1
+        )
+    )
+    
+    # Save the figure as a vector PDF file
+    fig.write_image(file_name, format='pdf')
+    print(f"Sankey diagram saved as {file_name}")
+
+# Note: Install the 'kaleido' package to enable saving figures as PDF
+# Run the following command in your terminal or command prompt:
+# pip install -U kaleido
+
+# Directory where your CSV files are stored
+directory = "/users/javed/Documents/Human_multiome/Celloracle/GRN_final/"
+
+# Iterate over each file in the directory
+for filename in os.listdir(directory):
+    if filename.endswith(".csv"):  # Make sure to process only CSV files
+        parts = filename.split('_')
+        age, inj = parts[0], parts[1]
+
+        file_path = os.path.join(directory, filename)
+        df = read_data(file_path)
+
+        # For each gene in TFF, generate individual Sankey diagrams showing only source genes
+        for tf in TFF:
+            nodes, links, node_coef_mean = create_sankey_data(df, [tf])
+            if len(links) > 0:
+                output_file = f"sankey_{age}_{inj}_{tf}_sources.pdf"
+                draw_sankey(nodes, links, node_coef_mean, output_file, age, inj, [tf])
+            else:
+                print(f"No source genes found for {tf} in {filename}")
+
+        # Now generate Sankey diagram with all genes showing only their source genes
+        nodes, links, node_coef_mean = create_sankey_data(df, TFF)
+        if len(links) > 0:
+            output_file = f"sankey_{age}_{inj}_{'_'.join(TFF)}_sources.pdf"
+            draw_sankey(nodes, links, node_coef_mean, output_file, age, inj, TFF)
+            print(f"Generated Sankey diagram for all TFFs in {filename} saved as {output_file}")
+        else:
+            print(f"No source genes found for TFFs in {filename}")
+
+
+
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set fonttype for PDF and PS backends to Type 42 to preserve text as editable text
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype'] = 42
+
+# Load the CSV file
+df = pd.read_csv("base_GRN_dataframe_filtered_scanned.csv")
+
+# Coordinates of interest
+coords_of_interest = [
+    "chr8_84978560_84979061",
+    "chr8_84979078_84979579"
+]
+
+# Filter the DataFrame for the desired genomic coordinates
+df_filtered = df[df['seqname'].isin(coords_of_interest)]
+
+# Drop rows with no direct factors
+df_direct = df_filtered.dropna(subset=['factors_direct'])
+
+# Sort by score and select top 25
+df_direct = df_direct.sort_values(by='score', ascending=False).head(17)
+
+# Create a figure using seaborn
+plt.figure(figsize=(15,5))
+sns.set_theme(style="whitegrid")  # Nice clean style
+
+# Use seaborn's barplot with a trivial estimator to avoid aggregation issues
+sns.barplot(
+    x='score',
+    y='factors_direct',
+    data=df_direct,
+    color='skyblue',
+    ci=None,
+    estimator=lambda x: x.iloc[0]
+)
+plt.xlabel('Score')
+plt.ylabel('Direct-Binding Factors')
+plt.title('Direct-Binding Factor Scores for Specified Coordinates')
+plt.tight_layout()
+
+# Save as a vector PDF (with Type 42 fonts for editable text in Illustrator)
+plt.savefig("direct_binding_factors.pdf", format='pdf')
+
+# Show the plot
+plt.show()
+
+
+
+
+
+
+
+
+######## CHORD PLOT ##########
+import pandas as pd
+import os
+import numpy as np
+import math
+import plotly.graph_objs as go
+
+###############################
+# 1. Reading & preparing data #
+###############################
+def read_data(file_path):
+    return pd.read_csv(file_path)
+
+def create_adjacency_matrix(df, tfs):
+    """
+    Create an adjacency matrix and metadata (e.g., coef_mean) from the input DataFrame.
+    """
+    # Filter to only rows where 'target' is among the TFS
+    df_filtered = df[df['target'].isin(tfs)]
+    
+    # Combine unique sources + targets
+    nodes = list(set(df_filtered['source']) | set(df_filtered['target']))
+    node_indices = {node: i for i, node in enumerate(nodes)}
+    n = len(nodes)
+    
+    # Initialize adjacency matrix
+    adjacency = np.zeros((n, n))
+    
+    # Dictionary to store accumulated coef_means for each node
+    node_coef_mean_dict = {node: [] for node in nodes}
+    
+    # Build adjacency & collect coef_means
+    for _, row in df_filtered.iterrows():
+        s = row['source']
+        t = row['target']
+        coef_mean = row['coef_mean']
+        
+        i = node_indices[s]
+        j = node_indices[t]
+        
+        # Use absolute value of coef_mean as weight
+        adjacency[i, j] += abs(coef_mean)
+        
+        # Accumulate coef_mean for color logic
+        node_coef_mean_dict[s].append(coef_mean)
+    
+    # Compute average coef_mean for each source node
+    node_coef_mean = {}
+    for node in nodes:
+        coef_list = node_coef_mean_dict[node]
+        if len(coef_list) > 0:
+            node_coef_mean[node] = sum(coef_list)/len(coef_list)
+        else:
+            node_coef_mean[node] = 0
+    
+    # Return adjacency, list of nodes, and dictionary of average coef_means
+    return adjacency, nodes, node_coef_mean
+
+###############################
+# 2. Helper math for chords   #
+###############################
+def chord_layout(adjacency, pad=2):
+    """
+    Compute layout parameters for each node's arc around the circle.
+      - adjacency: NxN matrix
+      - pad: gap (in degrees) between node arcs
+    Returns a list of dictionaries with angles for each node.
+    """
+    # Sum of all connections
+    total_weight = adjacency.sum()
+    
+    # Angles (in degrees) allocated to each node
+    group_data = []
+    start_angle = 0
+    
+    for i in range(adjacency.shape[0]):
+        row_sum = adjacency[i, :].sum() + adjacency[:, i].sum()
+        if total_weight == 0:
+            theta = 0
+        else:
+            theta = 360. * row_sum / total_weight
+        
+        group_data.append({
+            'index': i,
+            'theta0': start_angle,
+            'theta1': start_angle + theta,
+            'value': row_sum
+        })
+        start_angle += theta + pad  # add padding between arcs
+    
+    return group_data
+
+def pol2cart(r, theta):
+    """ Convert polar to cartesian coordinates (r, theta in radians). """
+    return (r * math.cos(theta), r * math.sin(theta))
+
+def shape_arc(x_center, y_center, r, theta0, theta1, color, opacity=1.0):
+    """
+    Return a dictionary to plot an arc shape in Plotly.
+    Angles (theta0, theta1) in degrees.
+    """
+    theta0_rad = math.radians(theta0)
+    theta1_rad = math.radians(theta1)
+    
+    # Plot as large arc + small arc to close shape
+    # We define a path using the elliptical-arc command in SVG.
+    large_arc = "1" if theta1 - theta0 > 180 else "0"
+    
+    x0, y0 = pol2cart(r, theta0_rad)
+    x1, y1 = pol2cart(r, theta1_rad)
+
+    path = (
+        f"M {x0 + x_center},{y0 + y_center} "
+        f"A {r},{r} 0 {large_arc},1 {x1 + x_center},{y1 + y_center}"
+    )
+    
+    return dict(
+        type="path",
+        path=path,
+        line=dict(color=color, width=2),
+        opacity=opacity
+    )
+
+###################################
+# 3. Drawing the chord with Plotly #
+###################################
+def draw_chord_diagram(adjacency, nodes, node_coef_mean, tfs, title, output_file):
+    """
+    Draw a chord diagram from the adjacency matrix and node info.
+    """
+    # 3.1 Prepare node layout data (start & end angles of arcs)
+    group_data = chord_layout(adjacency, pad=2)
+    
+    # 3.2 Assign color for each node
+    node_colors = []
+    for node in nodes:
+        if node in tfs:
+            node_colors.append("gray")
+        else:
+            coef = node_coef_mean[node]
+            if coef > 0:
+                node_colors.append("red")
+            elif coef < 0:
+                node_colors.append("lightblue")
+            else:
+                node_colors.append("white")
+    
+    # 3.3 Create Plotly figure & shapes
+    fig = go.Figure()
+    shapes = []
+
+    # Outer radius for arcs
+    R = 1.2
+    label_positions = []
+    
+    # 3.4 Draw each node's arc
+    for gd, color in zip(group_data, node_colors):
+        arc = shape_arc(0, 0, R, gd['theta0'], gd['theta1'], color)
+        shapes.append(arc)
+        
+        # We'll place a label in the middle of the arc
+        mid_angle = (gd['theta0'] + gd['theta1']) / 2.
+        mid_angle_rad = math.radians(mid_angle)
+        x_label, y_label = pol2cart(R + 0.1, mid_angle_rad)
+        
+        label_positions.append((x_label, y_label))
+    
+    # 3.5 Draw chords (inner connections)
+    # We need to loop over adjacency matrix i->j
+    # and draw arcs connecting node i’s arc to node j’s arc
+    max_line_width = 4  # define a max thickness for chords
+    max_val = adjacency.max() if adjacency.max() != 0 else 1
+    
+    for i in range(len(group_data)):
+        for j in range(i+1, len(group_data)):  # use (i+1) to avoid double-drawing symmetrical edges
+            # Weighted connection from adjacency[i, j] + adjacency[j, i]
+            val = adjacency[i, j] + adjacency[j, i]
+            if val == 0:
+                continue
+            
+            # fraction for line thickness
+            line_width = (val / max_val) * max_line_width
+            
+            # Midpoints for arcs i and j
+            i_mid = (group_data[i]['theta0'] + group_data[i]['theta1']) / 2.
+            j_mid = (group_data[j]['theta0'] + group_data[j]['theta1']) / 2.
+            
+            i_mid_rad = math.radians(i_mid)
+            j_mid_rad = math.radians(j_mid)
+            
+            xi, yi = pol2cart(R, i_mid_rad)
+            xj, yj = pol2cart(R, j_mid_rad)
+            
+            # Draw a path between (xi, yi) and (xj, yj)
+            path = f'M {xi},{yi} Q 0,0 {xj},{yj}'
+            
+            shapes.append(
+                dict(
+                    type="path",
+                    path=path,
+                    line=dict(color="grey", width=line_width),
+                    opacity=0.5
+                )
+            )
+    
+    # 3.6 Add shapes to figure
+    fig.update_layout(
+        title=title,
+        xaxis=dict(
+            visible=False,
+            range=[-2, 2]
+        ),
+        yaxis=dict(
+            visible=False,
+            range=[-2, 2]
+        ),
+        width=800,
+        height=800,
+        shapes=shapes,
+        showlegend=False
+    )
+    
+    # 3.7 Add node labels
+    for idx, node in enumerate(nodes):
+        x_label, y_label = label_positions[idx]
+        fig.add_annotation(
+            x=x_label,
+            y=y_label,
+            text=node,
+            showarrow=False,
+            font=dict(size=10)
+        )
+u    
+    # 3.8 Save the figure (requires kaleido or orca for static PDF)
+    fig.write_image(output_file, format="pdf")
+    print(f"Chord diagram saved as {output_file}")
+
+########################
+# 4. Bringing it all together
+########################
+if __name__ == "__main__":
+    directory = "/users/javed/Documents/Human_multiome/Celloracle/GRN_final/"
+    TFF = ['JUNB', 'CEBPD', 'CSRNP1', 'GLIS3', 'IRF1'] 
+    
+    for filename in os.listdir(directory):
+        if filename.endswith(".csv"):
+            parts = filename.split('_')
+            age, inj = parts[0], parts[1]
+
+            file_path = os.path.join(directory, filename)
+            df = read_data(file_path)
+
+            # For each TF, generate a chord diagram with that single TF as "target"
+            for tf in TFF:
+                adjacency, nodes, node_coef_mean = create_adjacency_matrix(df, [tf])
+                if adjacency.sum() > 0:
+                    output_file = f"chord_{age}_{inj}_{tf}_sources.pdf"
+                    title = f"Chord diagram for {tf} at {age} in {inj} identity neurons"
+                    draw_chord_diagram(adjacency, nodes, node_coef_mean, [tf], title, output_file)
+                else:
+                    print(f"No source genes found for {tf} in {filename}")
+
+            # Now generate a chord diagram with all TFF
+            adjacency, nodes, node_coef_mean = create_adjacency_matrix(df, TFF)
+            if adjacency.sum() > 0:
+                output_file = f"chord_{age}_{inj}_{'_'.join(TFF)}_sources.pdf"
+                title = f"Chord diagram for {', '.join(TFF)} at {age} in {inj} identity neurons"
+                draw_chord_diagram(adjacency, nodes, node_coef_mean, TFF, title, output_file)
+            else:
+                print(f"No source genes found for TFFs in {filename}")
+
+
+
+
+
+######### ALL MOTIFS PRESENT IN THE PROMOTER OF ALL GENES - ONE CSV PER GENE ##########
+import os
+import pandas as pd
+import re
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr, norm
+from itertools import combinations
+from matplotlib.backends.backend_pdf import PdfPages
+
+###############################################################################
+# 1. Imports and Setup
+###############################################################################
+
+# Define output directories
+OUTPUT_DIR = "per_gene_csvs_non_separated"
+HUMAN_OUTDIR = os.path.join(OUTPUT_DIR, "human")
+MOUSE_OUTDIR = os.path.join(OUTPUT_DIR, "mouse")
+
+# Create directories if they don't exist
+os.makedirs(HUMAN_OUTDIR, exist_ok=True)
+os.makedirs(MOUSE_OUTDIR, exist_ok=True)
+
+###############################################################################
+# 2. Load Data Without Merging
+###############################################################################
+
+# Read the scanned files
+df_scanned_human = pd.read_csv("base_GRN_dataframe_filtered_scanned_human.csv")
+df_scanned_mouse = pd.read_csv("base_GRN_dataframe_filtered_scanned_mouse.csv")
+
+# Read the filtered files
+df_filtered_human = pd.read_csv("base_GRN_dataframe_filtered_human.csv")
+df_filtered_mouse = pd.read_csv("base_GRN_dataframe_filtered_mouse.csv")
+
+###############################################################################
+# 3. Build Dictionary: peak_id -> gene_short_name
+###############################################################################
+
+# Create dictionaries for human and mouse
+human_peak2gene = dict(zip(df_filtered_human["peak_id"], df_filtered_human["gene_short_name"]))
+mouse_peak2gene = dict(zip(df_filtered_mouse["peak_id"], df_filtered_mouse["gene_short_name"]))
+
+###############################################################################
+# 4. Manually Match and Build a Minimal DataFrame
+###############################################################################
+
+def build_matched_df(df_scanned, peak2gene, species_name):
+    """
+    Builds a matched DataFrame with necessary columns and filters based on peak2gene.
+    
+    Parameters:
+        df_scanned (pd.DataFrame): Scanned DataFrame for a species.
+        peak2gene (dict): Mapping from peak_id to gene_short_name.
+        species_name (str): Species identifier ('human' or 'mouse').
+
+    Returns:
+        pd.DataFrame: Filtered and matched DataFrame.
+    """
+    records = []
+    for idx, row in df_scanned.iterrows():
+        seqname = row["seqname"]
+        if seqname in peak2gene:
+            records.append({
+                "seqname": seqname,
+                "motif_id": row["motif_id"],
+                "factors_direct": row["factors_direct"],
+                "factors_indirect": row["factors_indirect"],
+                "score": row["score"],
+                "species": species_name,
+                "gene_short_name": peak2gene[seqname]
+            })
+    return pd.DataFrame(records)
+
+# For human
+print("Matching human data...")
+df_human_matched = build_matched_df(df_scanned_human, human_peak2gene, "human")
+
+# For mouse
+print("Matching mouse data...")
+df_mouse_matched = build_matched_df(df_scanned_mouse, mouse_peak2gene, "mouse")
+
+###############################################################################
+# 5. Aggregate Scores by seqname and motif_id
+###############################################################################
+
+def aggregate_scores(df):
+    """
+    Aggregates the DataFrame by 'seqname' and 'motif_id', averaging the 'score'.
+    Keeps 'factors_direct' and 'factors_indirect' as comma-separated strings.
+
+    Parameters:
+        df (pd.DataFrame): Matched DataFrame for a species.
+
+    Returns:
+        pd.DataFrame: Aggregated DataFrame.
+    """
+    # Ensure 'factors_direct' and 'factors_indirect' are strings and fill NaN
+    df['factors_direct'] = df['factors_direct'].fillna('').astype(str)
+    df['factors_indirect'] = df['factors_indirect'].fillna('').astype(str)
+
+    aggregation_functions = {
+        "factors_direct": lambda x: ','.join(sorted(set(','.join(x).split(',')))),
+        "factors_indirect": lambda x: ','.join(sorted(set(','.join(x).split(',')))),
+        "score": "mean",
+        "species": "first",
+        "gene_short_name": "first"
+    }
+
+    # Select only the columns to aggregate to avoid FutureWarning
+    columns_to_agg = ["seqname", "motif_id", "factors_direct", "factors_indirect", "score", "species", "gene_short_name"]
+    df_to_agg = df[columns_to_agg]
+
+    df_aggregated = df_to_agg.groupby(["seqname", "motif_id"]).agg(aggregation_functions).reset_index()
+    return df_aggregated
+
+print("Aggregating scores for human...")
+df_human_aggregated = aggregate_scores(df_human_matched)
+
+print("Aggregating scores for mouse...")
+df_mouse_aggregated = aggregate_scores(df_mouse_matched)
+
+###############################################################################
+# 6. Write a CSV per gene (with sanitized filenames)
+###############################################################################
+
+def sanitize_filename(name):
+    """
+    Replace characters that are not letters, digits, underscores, or dashes
+    with underscores to avoid invalid file paths.
+
+    Parameters:
+        name (str): Original gene name.
+
+    Returns:
+        str: Sanitized gene name.
+    """
+    return re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
+
+def write_per_gene(df, outdir):
+    """
+    For each unique 'gene_short_name' in df, write out a CSV with columns:
+       motif_id, factors_direct, factors_indirect, score, species, seqname
+    The output filename is sanitized to avoid invalid characters.
+
+    Parameters:
+        df (pd.DataFrame): Aggregated DataFrame for a species.
+        outdir (str): Output directory path.
+    """
+    if df.empty:
+        print("No rows found. Nothing to write.")
+        return
+    
+    grouped = df.groupby("gene_short_name")
+    
+    for gene_name, sub_df in grouped:
+        # Prepare the filename by sanitizing the gene name
+        safe_gene_name = sanitize_filename(gene_name)
+        filename = f"{safe_gene_name}.csv"
+        filepath = os.path.join(outdir, filename)
+        
+        # Keep only the needed columns
+        sub_df_final = sub_df[[
+            "motif_id",
+            "factors_direct",
+            "factors_indirect",
+            "score",
+            "species",
+            "seqname"
+        ]].copy()
+        
+        # Write to CSV
+        sub_df_final.to_csv(filepath, index=False)
+    
+    print(f"Wrote one CSV per gene in {outdir}")
+
+print("Writing per-gene CSVs for human...")
+write_per_gene(df_human_aggregated, HUMAN_OUTDIR)
+
+print("Writing per-gene CSVs for mouse...")
+write_per_gene(df_mouse_aggregated, MOUSE_OUTDIR)
+
+print("Data preparation and CSV generation completed.")
+
+
+
+
+
+
+############ With csvs that didnt separate factors - running analysis unfiltered
+import os
+import numpy as np
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from scipy.stats import pearsonr, chi2_contingency, norm
+from itertools import combinations
+
+# =============================================================================
+# Constants
+# =============================================================================
+# Define the motifs to be highlighted (ensure they are in uppercase for case-insensitive matching)
+HIGHLIGHT_MOTIFS = {"HES1", "FOS", "EGR1", "ATF3", "IRF1", "GLIS3", "CENBPD"}
+HIGHLIGHT_MOTIFS = set(motif.upper() for motif in HIGHLIGHT_MOTIFS)
+
+# Define category colors
+COLOR_HUMAN_ONLY = '#E6E7E8'
+COLOR_MOUSE_ONLY = '#939598'
+COLOR_BOTH = '#000000'  # Black
+
+# =============================================================================
+# Matplotlib Configuration for Editable PDFs
+# =============================================================================
+# Set PDF font type to 42 (TrueType) for editable text in Illustrator
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['font.family'] = 'sans-serif'
+mpl.rcParams['font.sans-serif'] = ['Arial']  # You can choose another standard font if preferred
+mpl.rcParams['axes.unicode_minus'] = False  # Ensure minus signs are rendered correctly
+
+# =============================================================================
+# Main Analysis Function
+# =============================================================================
+
+def main():
+    prefixes = ["Sox2", "Pax6", "Junb"]  # Example prefixes; modify as needed
+    outdir = "analysis_output_updated"
+    os.makedirs(outdir, exist_ok=True)
+
+    gene_summaries = []
+
+    for prefix in prefixes:
+        try:
+            df_merged = load_gene_data_and_scale(prefix)
+        except FileNotFoundError as e:
+            print(e)
+            continue
+
+        # Clip negative scores
+        df_merged["score_human"] = df_merged["score_human"].clip(lower=0)
+        df_merged["score_mouse"] = df_merged["score_mouse"].clip(lower=0)
+
+        # Remove rows where both scores are zero
+        df_merged = df_merged[~((df_merged["score_human"] == 0) & (df_merged["score_mouse"] == 0))].copy()
+        
+        # Categorize motifs
+        df_categorized = categorize_motifs(df_merged)
+        counts = count_species_categories(df_categorized)
+
+        n_both = counts["both"]
+        n_mo = counts["mouse_only"]
+        n_ho = counts["human_only"]
+        n_total = n_both + n_mo + n_ho
+
+        # Compute correlation for motifs present in both species
+        df_both = df_categorized[(df_categorized["score_human"] > 10) & (df_categorized["score_mouse"] > 10)]
+        if df_both.empty:
+            r_val, p_val, n_both_pos = np.nan, np.nan, 0
+        else:
+            r_val, p_val = pearsonr(df_both["score_mouse"], df_both["score_human"])
+            n_both_pos = len(df_both)
+
+        # Plot scatter with highlighted motifs
+        scatter_pdf_path = os.path.join(outdir, f"{prefix}_scatter_plot.pdf")
+        plot_scatter_all_categories(df_categorized, prefix, scatter_pdf_path, r_val, p_val)
+
+        # Save summary for this gene
+        gene_summaries.append({
+            "gene": prefix,
+            "both": n_both,
+            "mouse_only": n_mo,
+            "human_only": n_ho,
+            "total": n_total,
+            "r_value": r_val,
+            "p_value": p_val,
+            "n_both_pos": n_both_pos
+        })
+
+        # Save separate CSVs by category
+        separate_csv_by_category(prefix, df_categorized, outdir)
+
+    if gene_summaries:
+        # Generate and save percentage-based stacked bar plot
+        stacked_pdf = os.path.join(outdir, "StackedBar_all_genes_percentage.pdf")
+        with PdfPages(stacked_pdf) as pdf:
+            fig = plot_stacked_bar_percentage(gene_summaries)
+            pdf.savefig(fig)
+            plt.close(fig)
+        print(f"Percentage-based stacked bar saved to: {stacked_pdf}")
+
+    # Perform pairwise statistical tests and chi-squared analysis
+    pairwise_results = perform_pairwise_tests(gene_summaries, prefixes)
+    chi_squared_results = perform_chi_squared_tests(gene_summaries)
+
+    # Write results to CSV
+    if gene_summaries:
+        stats_csv_path = os.path.join(outdir, "analysis_stats.csv")
+        write_stats_csv(gene_summaries, pairwise_results, chi_squared_results, stats_csv_path)
+        print(f"Stats CSV written to: {stats_csv_path}")
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def load_gene_data_and_scale(prefix):
+    """
+    Load and scale gene data for a given prefix (gene name).
+    Assumes CSV files are located in specific directories.
+    """
+    human_name = prefix.upper()
+    mouse_name = prefix.capitalize()
+
+    human_path = os.path.join("per_gene_csvs_non_separated", "human", f"{human_name}.csv")
+    mouse_path = os.path.join("per_gene_csvs_non_separated", "mouse", f"{mouse_name}.csv")
+
+    if not os.path.exists(human_path):
+        raise FileNotFoundError(f"Cannot find Human CSV: {human_path}")
+    if not os.path.exists(mouse_path):
+        raise FileNotFoundError(f"Cannot find Mouse CSV: {mouse_path}")
+
+    # Read CSVs, ensuring that factor columns are read as strings
+    df_h = pd.read_csv(human_path, dtype=str).rename(columns={"score": "score_human"})
+    df_m = pd.read_csv(mouse_path, dtype=str).rename(columns={"score": "score_mouse"})
+
+    # Replace non-string entries (e.g., NaN, numeric) with empty strings
+    factor_cols_human = [col for col in df_h.columns if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+    factor_cols_mouse = [col for col in df_m.columns if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+
+    for col in factor_cols_human:
+        df_h[col] = df_h[col].fillna('').astype(str)
+
+    for col in factor_cols_mouse:
+        df_m[col] = df_m[col].fillna('').astype(str)
+
+    # Merge on 'motif_id'
+    df_merged = pd.merge(df_h, df_m, on="motif_id", how="outer").fillna(0)
+
+    # Convert score columns to numeric
+    df_merged["score_human"] = pd.to_numeric(df_merged["score_human"], errors='coerce').fillna(0)
+    df_merged["score_mouse"] = pd.to_numeric(df_merged["score_mouse"], errors='coerce').fillna(0)
+
+    # Scale scores by their respective maxima
+    max_h = df_merged["score_human"].max()
+    max_m = df_merged["score_mouse"].max()
+
+    if max_h > 0:
+        df_merged["score_human"] = df_merged["score_human"] / max_h
+    if max_m > 0:
+        df_merged["score_mouse"] = df_merged["score_mouse"] / max_m
+
+    return df_merged
+
+def categorize_motifs(df):
+    """
+    Categorize motifs into 'mouse_only', 'human_only', or 'both'.
+    """
+    df = df.copy()
+    df["category"] = "mouse_only"
+
+    df.loc[(df["score_human"] > 0) & (df["score_mouse"] > 0), "category"] = "both"
+    df.loc[(df["score_human"] > 0) & (df["score_mouse"] == 0), "category"] = "human_only"
+    return df
+
+def count_species_categories(df):
+    """
+    Count the number of motifs in each category.
+    """
+    both = df[(df["score_human"] > 0) & (df["score_mouse"] > 0)].shape[0]
+    mo = df[(df["score_mouse"] > 0) & (df["score_human"] == 0)].shape[0]
+    ho = df[(df["score_human"] > 0) & (df["score_mouse"] == 0)].shape[0]
+
+    return {"both": both, "mouse_only": mo, "human_only": ho}
+
+def find_highlight_motifs(row, factor_cols):
+    """
+    For a given row, search through the specified factor columns for any motifs in HIGHLIGHT_MOTIFS.
+    Returns a list of matched motifs.
+    """
+    matched_motifs = set()
+    for col in factor_cols:
+        cell = row[col]
+        if pd.isna(cell) or not isinstance(cell, str):
+            continue
+        # Split by comma, strip whitespace, and convert to uppercase for case-insensitive matching
+        motifs = [motif.strip().upper() for motif in cell.split(',') if motif.strip()]
+        for motif in motifs:
+            if motif in HIGHLIGHT_MOTIFS:
+                matched_motifs.add(motif)
+    return list(matched_motifs)
+
+def plot_scatter_all_categories(df_categorized, prefix, scatter_pdf_path, r_val, p_val):
+    """
+    Plot a scatter plot with categories highlighted in specified colors.
+    Additionally, highlight specific motifs defined in HIGHLIGHT_MOTIFS.
+    """
+    plt.figure(figsize=(8, 6))
+    
+    # Filter motifs by category
+    both = df_categorized[df_categorized['category'] == 'both']
+    mouse_only = df_categorized[df_categorized['category'] == 'mouse_only']
+    human_only = df_categorized[df_categorized['category'] == 'human_only']
+    uncategorized = df_categorized[df_categorized['category'] == 'uncategorized']
+
+    # Plot each category with specified color
+    plt.scatter(both["score_mouse"], both["score_human"], 
+                color=COLOR_BOTH, label='Both', edgecolor='k', alpha=0.7)
+    plt.scatter(mouse_only["score_mouse"], mouse_only["score_human"], 
+                color=COLOR_MOUSE_ONLY, label='Mouse Only', edgecolor='k', alpha=0.7)
+    plt.scatter(human_only["score_mouse"], human_only["score_human"], 
+                color=COLOR_HUMAN_ONLY, label='Human Only', edgecolor='k', alpha=0.7)
+    
+    # Optionally plot uncategorized motifs
+    if not uncategorized.empty:
+        plt.scatter(uncategorized["score_mouse"], uncategorized["score_human"], 
+                    color='grey', label='Uncategorized', edgecolor='k', alpha=0.5)
+
+    # Identify columns to search for highlighted motifs
+    factor_cols = [col for col in df_categorized.columns 
+                  if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+
+    # Find highlighted motifs
+    df_categorized['highlight_motifs'] = df_categorized.apply(
+        lambda row: find_highlight_motifs(row, factor_cols), axis=1
+    )
+
+    # Get the rows with highlighted motifs
+    highlighted = df_categorized[df_categorized['highlight_motifs'].map(lambda x: len(x) > 0)]
+
+    if not highlighted.empty:
+        # Plot highlighted motifs with distinct styling
+        plt.scatter(highlighted["score_mouse"], highlighted["score_human"], 
+                    facecolors='none', edgecolors='red', s=100, label='Highlighted Motifs', linewidth=2)
+        
+        # Annotate highlighted motifs
+        for _, row in highlighted.iterrows():
+            matched_motifs = ', '.join(row['highlight_motifs'])
+            annotation = f'{row["motif_id"]} [{matched_motifs}]'
+            plt.text(row["score_mouse"] + 0.01, row["score_human"] + 0.01, 
+                     annotation, fontsize=9, color='red', weight='bold')
+
+    # Add regression line or other annotations if needed
+    plt.xlabel('Mouse Score')
+    plt.ylabel('Human Score')
+    plt.title(f'Scatter Plot for {prefix}\nPearson r = {r_val:.2f}, p = {p_val:.3f}')
+    plt.legend()
+    plt.tight_layout()
+
+    # Save to PDF
+    plt.savefig(scatter_pdf_path, format='pdf')
+    plt.close()
+    print(f"Scatter plot saved to: {scatter_pdf_path}")
+
+def plot_stacked_bar_percentage(gene_summaries):
+    """
+    Plot a stacked bar chart for all genes showing the percentage distribution of categories.
+    
+    Args:
+        gene_summaries (list of dict): List containing summary dictionaries for each gene.
+    
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+    """
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    genes = [d['gene'] for d in gene_summaries]
+    both = np.array([d['both'] for d in gene_summaries])
+    mouse_only = np.array([d['mouse_only'] for d in gene_summaries])
+    human_only = np.array([d['human_only'] for d in gene_summaries])
+    
+    # Calculate total motifs per gene to compute percentages
+    totals = both + mouse_only + human_only
+    
+    # Avoid division by zero
+    totals[totals == 0] = 1
+    
+    # Calculate percentages
+    both_pct = (both / totals) * 100
+    mouse_only_pct = (mouse_only / totals) * 100
+    human_only_pct = (human_only / totals) * 100
+    
+    # Plot each category with specified color
+    ax.bar(genes, both_pct, label='Both', color=COLOR_BOTH)
+    ax.bar(genes, mouse_only_pct, bottom=both_pct, label='Mouse Only', color=COLOR_MOUSE_ONLY)
+    ax.bar(genes, human_only_pct, bottom=both_pct + mouse_only_pct, label='Human Only', color=COLOR_HUMAN_ONLY)
+    
+    # Set y-axis to percentage
+    ax.set_ylabel('Percentage of Motifs (%)')
+    ax.set_ylim(0, 100)
+    ax.set_xlabel('Genes')
+    ax.set_title('Percentage Distribution of Motif Categories per Gene')
+    ax.legend()
+    
+    # Add percentage labels on the bars
+    for i, gene in enumerate(genes):
+        y_offset = 0
+        for pct, category_color in zip([both_pct[i], mouse_only_pct[i], human_only_pct[i]], 
+                                       [COLOR_BOTH, COLOR_MOUSE_ONLY, COLOR_HUMAN_ONLY]):
+            if pct > 5:  # Only label segments larger than 5% to avoid clutter
+                ax.text(i, y_offset + pct / 2, f'{pct:.1f}%', ha='center', va='center', 
+                        color='white', fontsize=9, fontweight='bold')
+            y_offset += pct
+    
+    plt.tight_layout()
+    
+    return fig
+
+def perform_pairwise_tests(gene_summaries, prefixes):
+    """
+    Perform pairwise statistical tests between gene prefixes.
+    
+    Args:
+        gene_summaries (list of dict): List containing summary dictionaries for each gene.
+        prefixes (list): List of gene prefixes.
+    
+    Returns:
+        list of dict: Pairwise test results.
+    """
+    pairwise_results = []
+
+    if len(prefixes) >= 2 and len(gene_summaries) >= 2:
+        for g1, g2 in combinations(prefixes, 2):
+            s1 = next((d for d in gene_summaries if d["gene"] == g1), None)
+            s2 = next((d for d in gene_summaries if d["gene"] == g2), None)
+            if s1 is None or s2 is None:
+                continue
+
+            fisher_z, fisher_p = fisher_r_comparison(s1["r_value"], s1["n_both_pos"], 
+                                                    s2["r_value"], s2["n_both_pos"])
+
+            cat_list = ["both", "mouse_only", "human_only"]
+            two_prop_results = {cat: two_proportion_ztest(s1[cat], s1["total"], s2[cat], s2["total"]) 
+                                for cat in cat_list}
+
+            pairwise_results.append({
+                "geneA": g1,
+                "geneB": g2,
+                "fisher_z": fisher_z,
+                "fisher_p": fisher_p,
+                "two_prop_both_z": two_prop_results["both"][0],
+                "two_prop_both_p": two_prop_results["both"][1],
+                "two_prop_mouse_z": two_prop_results["mouse_only"][0],
+                "two_prop_mouse_p": two_prop_results["mouse_only"][1],
+                "two_prop_human_z": two_prop_results["human_only"][0],
+                "two_prop_human_p": two_prop_results["human_only"][1],
+            })
+
+    return pairwise_results
+
+def perform_chi_squared_tests(gene_summaries):
+    """
+    Perform chi-squared tests to compare the distribution of motifs across categories
+    between pairs of genes: (Junb vs Sox2), (Junb vs Pax6), (Sox2 vs Pax6).
+
+    Returns:
+        list of dict: Chi-squared results for each pair, including p-values for
+                      'both', 'mouse_only', and 'human_only'.
+    """
+    chi_squared_results = []
+    pairs = [("Junb", "Sox2"), ("Junb", "Pax6"), ("Sox2", "Pax6")]
+
+    for g1, g2 in pairs:
+        s1 = next((d for d in gene_summaries if d["gene"] == g1), None)
+        s2 = next((d for d in gene_summaries if d["gene"] == g2), None)
+        if s1 is None or s2 is None:
+            print(f"Skipping pair ({g1}, {g2}) due to missing gene summaries.")
+            continue
+
+        # Create contingency table for overall chi-squared test
+        table_overall = np.array([
+            [s1["both"], s1["mouse_only"], s1["human_only"]],
+            [s2["both"], s2["mouse_only"], s2["human_only"]]
+        ])
+
+        # Check for zeros in the contingency table
+        if np.any(table_overall == 0):
+            print(f"Skipping chi-squared test for pair ({g1}, {g2}) due to zero counts in the contingency table.")
+            chi2_overall, p_val_overall = np.nan, np.nan
+        else:
+            try:
+                chi2_overall, p_val_overall, _, _ = chi2_contingency(table_overall)
+            except ValueError as e:
+                print(f"Chi-squared test failed for pair ({g1}, {g2}): {e}")
+                chi2_overall, p_val_overall = np.nan, np.nan
+
+        # Chi-squared tests for individual categories
+        p_values = {}
+        for category in ["both", "mouse_only", "human_only"]:
+            # Create 2x2 contingency table for the category
+            table_cat = np.array([
+                [s1[category], s2[category]],
+                [s1["total"] - s1[category], s2["total"] - s2[category]]
+            ])
+
+            # Check for zeros in the category contingency table
+            if np.any(table_cat == 0):
+                print(f"Skipping chi-squared test for category '{category}' in pair ({g1}, {g2}) due to zero counts.")
+                p_values[f"{category}_p_value"] = np.nan
+                continue
+
+            try:
+                chi2_cat, p_val_cat, _, _ = chi2_contingency(table_cat)
+                p_values[f"{category}_p_value"] = p_val_cat
+            except ValueError as e:
+                print(f"Chi-squared test failed for category '{category}' in pair ({g1}, {g2}): {e}")
+                p_values[f"{category}_p_value"] = np.nan
+
+        chi_squared_results.append({
+            "geneA": g1,
+            "geneB": g2,
+            "chi2_statistic_overall": chi2_overall,
+            "p_value_overall": p_val_overall,
+            **p_values  # Unpack the p-values for 'both', 'mouse_only', 'human_only'
+        })
+
+    return chi_squared_results
+
+def write_stats_csv(gene_summaries, pairwise_results, chi_squared_results, outpath):
+    """
+    Write the statistical analysis results to a CSV file.
+    """
+    df_gene = pd.DataFrame(gene_summaries)[["gene", "both", "mouse_only", "human_only", "total", "r_value", "p_value", "n_both_pos"]]
+    df_pair = pd.DataFrame(pairwise_results)
+    df_chi = pd.DataFrame(chi_squared_results)
+
+    with open(outpath, "w") as f:
+        f.write("Single-Gene Results:\n")
+        df_gene.to_csv(f, index=False)
+        f.write("\n\nPairwise Comparisons:\n")
+        if not df_pair.empty:
+            df_pair.to_csv(f, index=False)
+        else:
+            f.write("No pairwise comparisons.\n")
+
+        f.write("\n\nChi-Squared Test Results:\n")
+        if not df_chi.empty:
+            df_chi.to_csv(f, index=False)
+        else:
+            f.write("No chi-squared test results.\n")
+
+def separate_csv_by_category(prefix, df_merged, outdir="analysis_output"):
+    """
+    Save separate CSV files for each category.
+    """
+    # Identify factor columns with their suffixes
+    factor_cols_mouse = [col for col in df_merged.columns if col.startswith('factors_direct_mouse') or col.startswith('factors_indirect_mouse')]
+    factor_cols_human = [col for col in df_merged.columns if col.startswith('factors_direct_human') or col.startswith('factors_indirect_human')]
+
+    # Extract motifs for each category
+    df_mouse_only = df_merged[(df_merged["score_mouse"] > 0) & (df_merged["score_human"] == 0)].copy()
+    df_human_only = df_merged[(df_merged["score_human"] > 0) & (df_merged["score_mouse"] == 0)].copy()
+    df_both = df_merged[(df_merged["score_human"] > 0) & (df_merged["score_mouse"] > 0)].copy()
+
+    # Reorder columns if necessary or keep as is
+    df_mouse_only.to_csv(os.path.join(outdir, f"{prefix}_mouse_only.csv"), index=False)
+    df_human_only.to_csv(os.path.join(outdir, f"{prefix}_human_only.csv"), index=False)
+    df_both.to_csv(os.path.join(outdir, f"{prefix}_both.csv"), index=False)
+
+# =============================================================================
+# Statistical Test Helper Functions
+# =============================================================================
+
+def fisher_r_comparison(r1, n1, r2, n2):
+    """
+    Compare two correlation coefficients using Fisher's z-transformation.
+    
+    Args:
+        r1 (float): Correlation coefficient 1.
+        n1 (int): Sample size 1.
+        r2 (float): Correlation coefficient 2.
+        n2 (int): Sample size 2.
+    
+    Returns:
+        tuple: (z_score, p_value)
+    """
+    if np.isnan(r1) or np.isnan(r2) or n1 <= 3 or n2 <= 3:
+        return np.nan, np.nan
+    z1, z2 = fisher_r_to_z(r1), fisher_r_to_z(r2)
+    se_diff = np.sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
+    z_score = (z1 - z2) / se_diff
+    p_val = 2 * (1 - norm.cdf(abs(z_score)))
+    return z_score, p_val
+
+def fisher_r_to_z(r):
+    """
+    Convert correlation coefficient to Fisher's z.
+    
+    Args:
+        r (float): Correlation coefficient.
+    
+    Returns:
+        float: Fisher's z value.
+    """
+    return 0.5 * np.log((1 + r) / (1 - r))
+
+def two_proportion_ztest(x1, n1, x2, n2):
+    """
+    Perform a two-proportion z-test comparing p1 = x1/n1 vs p2 = x2/n2.
+    
+    Args:
+        x1 (int): Success count in the first group.
+        n1 (int): Sample size of the first group.
+        x2 (int): Success count in the second group.
+        n2 (int): Sample size of the second group.
+        
+    Returns:
+        tuple: (z_val, p_val)
+    """
+    if n1 == 0 or n2 == 0:
+        return np.nan, np.nan
+
+    p1 = x1 / n1
+    p2 = x2 / n2
+    p_pool = (x1 + x2) / (n1 + n2) if (n1 + n2) > 0 else 0
+
+    se = np.sqrt(p_pool * (1 - p_pool) * ((1 / n1) + (1 / n2)))
+    if se == 0:
+        return np.nan, np.nan  # Handle zero standard error explicitly
+
+    z_val = (p1 - p2) / se
+    p_val = 2 * (1 - norm.cdf(abs(z_val)))
+    return z_val, p_val
+
+# =============================================================================
+# Run
+# =============================================================================
+
+if __name__ == "__main__":
+    main()
+
+
+    
+################ ONLY SOX2 AND JUNB
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+from scipy.stats import pearsonr, chi2_contingency, norm
+from itertools import combinations
+
+# =============================================================================
+# Constants
+# =============================================================================
+# Define the motifs to be highlighted (ensure they are in uppercase for case-insensitive matching)
+HIGHLIGHT_MOTIFS = {"HES1", "FOS", "EGR1", "ATF3", "IRF1", "GLIS3", "CENBPD"}
+HIGHLIGHT_MOTIFS = set(motif.upper() for motif in HIGHLIGHT_MOTIFS)
+
+# Define category colors
+COLOR_HUMAN_ONLY = '#E6E7E8'
+COLOR_MOUSE_ONLY = '#939598'
+COLOR_BOTH = '#000000'  # Black
+
+# =============================================================================
+# Matplotlib Configuration for Editable PDFs
+# =============================================================================
+# Set PDF font type to 42 (TrueType) for editable text in Illustrator
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['font.family'] = 'sans-serif'
+mpl.rcParams['font.sans-serif'] = ['Arial']  # You can choose another standard font if preferred
+mpl.rcParams['axes.unicode_minus'] = False  # Ensure minus signs are rendered correctly
+
+# =============================================================================
+# Main Analysis Function
+# =============================================================================
+
+def main():
+    prefixes = ["Junb", "Sox2"]  # Focus on two genes: Junb and Sox2
+    outdir = "analysis_output_updated"
+    os.makedirs(outdir, exist_ok=True)
+
+    gene_summaries = []
+
+    for prefix in prefixes:
+        try:
+            df_merged = load_gene_data_and_scale(prefix)
+        except FileNotFoundError as e:
+            print(e)
+            continue
+
+        # Clip negative scores
+        df_merged["score_human_raw"] = df_merged["score_human_raw"].clip(lower=0)
+        df_merged["score_mouse_raw"] = df_merged["score_mouse_raw"].clip(lower=0)
+
+        # Filter for motifs with score >10 in either human or mouse
+        df_filtered = df_merged[(df_merged["score_human_raw"] > 0) | (df_merged["score_mouse_raw"] > 0)].copy()
+        print(f"Filtered motifs for gene {prefix}: {df_filtered.shape[0]} motifs retained after applying score >10 filter.")
+
+        # Remove rows where both raw scores are zero (redundant after filtering, but kept for safety)
+        df_filtered = df_filtered[~((df_filtered["score_human_raw"] == 0) & (df_filtered["score_mouse_raw"] == 0))].copy()
+        
+        # Categorize motifs
+        df_categorized = categorize_motifs(df_filtered)
+        counts = count_species_categories(df_categorized)
+
+        n_both = counts["both"]
+        n_mo = counts["mouse_only"]
+        n_ho = counts["human_only"]
+        n_total = n_both + n_mo + n_ho
+
+        # Compute correlation for motifs present in both species
+        df_both = df_categorized[(df_categorized["score_human"] > 0) & (df_categorized["score_mouse"] > 0)]
+        if df_both.empty:
+            r_val, p_val, n_both_pos = np.nan, np.nan, 0
+        else:
+            r_val, p_val = pearsonr(df_both["score_mouse"], df_both["score_human"])
+            n_both_pos = len(df_both)
+
+        # Plot scatter with highlighted motifs
+        scatter_pdf_path = os.path.join(outdir, f"{prefix}_scatter_plot.pdf")
+        plot_scatter_all_categories(df_categorized, prefix, scatter_pdf_path, r_val, p_val)
+
+        # Save summary for this gene
+        gene_summaries.append({
+            "gene": prefix,
+            "both": n_both,
+            "mouse_only": n_mo,
+            "human_only": n_ho,
+            "total": n_total,
+            "r_value": r_val,
+            "p_value": p_val,
+            "n_both_pos": n_both_pos
+        })
+
+        # Save separate CSVs by category
+        separate_csv_by_category(prefix, df_categorized, outdir)
+
+    if gene_summaries:
+        # Generate and save percentage-based stacked bar plot
+        stacked_pdf = os.path.join(outdir, "StackedBar_all_genes_percentage.pdf")
+        with PdfPages(stacked_pdf) as pdf:
+            fig = plot_stacked_bar_percentage(gene_summaries)
+            pdf.savefig(fig)
+            plt.close(fig)
+        print(f"Percentage-based stacked bar saved to: {stacked_pdf}")
+
+    # Perform pairwise statistical tests and chi-squared analysis
+    pairwise_results = perform_pairwise_tests(gene_summaries, prefixes)
+    chi_squared_results = perform_chi_squared_tests(gene_summaries)
+
+    # Write results to CSV
+    if gene_summaries:
+        stats_csv_path = os.path.join(outdir, "analysis_stats.csv")
+        write_stats_csv(gene_summaries, pairwise_results, chi_squared_results, stats_csv_path)
+        print(f"Stats CSV written to: {stats_csv_path}")
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def load_gene_data_and_scale(prefix):
+    """
+    Load and scale gene data for a given prefix (gene name).
+    Assumes CSV files are located in specific directories.
+    """
+    human_name = prefix.upper()
+    mouse_name = prefix.capitalize()
+
+    human_path = os.path.join("per_gene_csvs_non_separated", "human", f"{human_name}.csv")
+    mouse_path = os.path.join("per_gene_csvs_non_separated", "mouse", f"{mouse_name}.csv")
+
+    if not os.path.exists(human_path):
+        raise FileNotFoundError(f"Cannot find Human CSV: {human_path}")
+    if not os.path.exists(mouse_path):
+        raise FileNotFoundError(f"Cannot find Mouse CSV: {mouse_path}")
+
+    # Read CSVs, ensuring that factor columns are read as strings
+    df_h = pd.read_csv(human_path, dtype=str).rename(columns={"score": "score_human_raw"})
+    df_m = pd.read_csv(mouse_path, dtype=str).rename(columns={"score": "score_mouse_raw"})
+
+    # Identify factor columns
+    factor_cols_human = [col for col in df_h.columns if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+    factor_cols_mouse = [col for col in df_m.columns if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+
+    # Replace non-string entries (e.g., NaN, numeric) with empty strings
+    for col in factor_cols_human:
+        df_h[col] = df_h[col].fillna('').astype(str)
+
+    for col in factor_cols_mouse:
+        df_m[col] = df_m[col].fillna('').astype(str)
+
+    # Merge on 'motif_id'
+    df_merged = pd.merge(df_h, df_m, on="motif_id", how="outer").fillna(0)
+
+    # Convert score columns to numeric
+    df_merged["score_human_raw"] = pd.to_numeric(df_merged["score_human_raw"], errors='coerce').fillna(0)
+    df_merged["score_mouse_raw"] = pd.to_numeric(df_merged["score_mouse_raw"], errors='coerce').fillna(0)
+
+    # Scale scores by their respective maxima
+    max_h = df_merged["score_human_raw"].max()
+    max_m = df_merged["score_mouse_raw"].max()
+
+    if max_h > 0:
+        df_merged["score_human"] = df_merged["score_human_raw"] / max_h
+    else:
+        df_merged["score_human"] = 0
+
+    if max_m > 0:
+        df_merged["score_mouse"] = df_merged["score_mouse_raw"] / max_m
+    else:
+        df_merged["score_mouse"] = 0
+
+    return df_merged
+
+def categorize_motifs(df):
+    """
+    Categorize motifs into 'mouse_only', 'human_only', or 'both'.
+    """
+    df = df.copy()
+    df["category"] = "mouse_only"
+
+    df.loc[(df["score_human"] > 0) & (df["score_mouse"] > 0), "category"] = "both"
+    df.loc[(df["score_human"] > 0) & (df["score_mouse"] == 0), "category"] = "human_only"
+    return df
+
+def count_species_categories(df):
+    """
+    Count the number of motifs in each category.
+    """
+    both = df[(df["score_human"] > 0) & (df["score_mouse"] > 0)].shape[0]
+    mo = df[(df["score_mouse"] > 0) & (df["score_human"] == 0)].shape[0]
+    ho = df[(df["score_human"] > 0) & (df["score_mouse"] == 0)].shape[0]
+
+    return {"both": both, "mouse_only": mo, "human_only": ho}
+
+def find_highlight_motifs(row, factor_cols):
+    """
+    For a given row, search through the specified factor columns for any motifs in HIGHLIGHT_MOTIFS.
+    Returns a list of matched motifs.
+    """
+    matched_motifs = set()
+    for col in factor_cols:
+        cell = row[col]
+        if pd.isna(cell) or not isinstance(cell, str):
+            continue
+        # Split by comma, strip whitespace, and convert to uppercase for case-insensitive matching
+        motifs = [motif.strip().upper() for motif in cell.split(',') if motif.strip()]
+        for motif in motifs:
+            if motif in HIGHLIGHT_MOTIFS:
+                matched_motifs.add(motif)
+    return list(matched_motifs)
+
+def plot_scatter_all_categories(df_categorized, prefix, scatter_pdf_path, r_val, p_val):
+    """
+    Plot a scatter plot with categories highlighted in specified colors.
+    Additionally, highlight specific motifs defined in HIGHLIGHT_MOTIFS.
+    """
+    plt.figure(figsize=(8, 6))
+    
+    # Filter motifs by category
+    both = df_categorized[df_categorized['category'] == 'both']
+    mouse_only = df_categorized[df_categorized['category'] == 'mouse_only']
+    human_only = df_categorized[df_categorized['category'] == 'human_only']
+    uncategorized = df_categorized[df_categorized['category'] == 'uncategorized']
+
+    # Plot each category with specified color
+    plt.scatter(both["score_mouse"], both["score_human"], 
+                color=COLOR_BOTH, label='Both', edgecolor='k', alpha=0.7)
+    plt.scatter(mouse_only["score_mouse"], mouse_only["score_human"], 
+                color=COLOR_MOUSE_ONLY, label='Mouse Only', edgecolor='k', alpha=0.7)
+    plt.scatter(human_only["score_mouse"], human_only["score_human"], 
+                color=COLOR_HUMAN_ONLY, label='Human Only', edgecolor='k', alpha=0.7)
+    
+    # Optionally plot uncategorized motifs
+    if not uncategorized.empty:
+        plt.scatter(uncategorized["score_mouse"], uncategorized["score_human"], 
+                    color='grey', label='Uncategorized', edgecolor='k', alpha=0.5)
+
+    # Identify columns to search for highlighted motifs
+    factor_cols = [col for col in df_categorized.columns 
+                  if col.startswith('factors_direct') or col.startswith('factors_indirect')]
+
+    # Find highlighted motifs
+    df_categorized['highlight_motifs'] = df_categorized.apply(
+        lambda row: find_highlight_motifs(row, factor_cols), axis=1
+    )
+
+    # Get the rows with highlighted motifs
+    highlighted = df_categorized[df_categorized['highlight_motifs'].map(lambda x: len(x) > 0)]
+
+    if not highlighted.empty:
+        # Plot highlighted motifs with distinct styling
+        plt.scatter(highlighted["score_mouse"], highlighted["score_human"], 
+                    facecolors='none', edgecolors='red', s=100, label='Highlighted Motifs', linewidth=2)
+        
+        # Annotate highlighted motifs
+        for _, row in highlighted.iterrows():
+            matched_motifs = ', '.join(row['highlight_motifs'])
+            annotation = f'{row["motif_id"]} [{matched_motifs}]'
+            plt.text(row["score_mouse"] + 0.01, row["score_human"] + 0.01, 
+                     annotation, fontsize=9, color='red', weight='bold')
+
+    # Add regression line or other annotations if needed
+    plt.xlabel('Mouse Score')
+    plt.ylabel('Human Score')
+    plt.title(f'Scatter Plot for {prefix}\nPearson r = {r_val:.2f}, p = {p_val:.3f}')
+    plt.legend()
+    plt.tight_layout()
+
+    # Save to PDF
+    plt.savefig(scatter_pdf_path, format='pdf')
+    plt.close()
+    print(f"Scatter plot saved to: {scatter_pdf_path}")
+
+def plot_stacked_bar_percentage(gene_summaries):
+    """
+    Plot a stacked bar chart for all genes showing the percentage distribution of categories.
+    
+    Args:
+        gene_summaries (list of dict): List containing summary dictionaries for each gene.
+    
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+    """
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    genes = [d['gene'] for d in gene_summaries]
+    both = np.array([d['both'] for d in gene_summaries])
+    mouse_only = np.array([d['mouse_only'] for d in gene_summaries])
+    human_only = np.array([d['human_only'] for d in gene_summaries])
+    
+    # Calculate total motifs per gene to compute percentages
+    totals = both + mouse_only + human_only
+    
+    # Avoid division by zero
+    totals[totals == 0] = 1
+    
+    # Calculate percentages
+    both_pct = (both / totals) * 100
+    mouse_only_pct = (mouse_only / totals) * 100
+    human_only_pct = (human_only / totals) * 100
+    
+    # Plot each category with specified color
+    ax.bar(genes, both_pct, label='Both', color=COLOR_BOTH)
+    ax.bar(genes, mouse_only_pct, bottom=both_pct, label='Mouse Only', color=COLOR_MOUSE_ONLY)
+    ax.bar(genes, human_only_pct, bottom=both_pct + mouse_only_pct, label='Human Only', color=COLOR_HUMAN_ONLY)
+    
+    # Set y-axis to percentage
+    ax.set_ylabel('Percentage of Motifs (%)')
+    ax.set_ylim(0, 100)
+    ax.set_xlabel('Genes')
+    ax.set_title('Percentage Distribution of Motif Categories per Gene')
+    ax.legend()
+    
+    # Add percentage labels on the bars
+    for i, gene in enumerate(genes):
+        y_offset = 0
+        for pct, category_color in zip([both_pct[i], mouse_only_pct[i], human_only_pct[i]], 
+                                       [COLOR_BOTH, COLOR_MOUSE_ONLY, COLOR_HUMAN_ONLY]):
+            if pct > 5:  # Only label segments larger than 5% to avoid clutter
+                ax.text(i, y_offset + pct / 2, f'{pct:.1f}%', ha='center', va='center', 
+                        color='white', fontsize=9, fontweight='bold')
+            y_offset += pct
+    
+    plt.tight_layout()
+    
+    return fig
+
+def perform_pairwise_tests(gene_summaries, prefixes):
+    """
+    Perform pairwise statistical tests between gene prefixes.
+    
+    Args:
+        gene_summaries (list of dict): List containing summary dictionaries for each gene.
+        prefixes (list): List of gene prefixes.
+    
+    Returns:
+        list of dict: Pairwise test results.
+    """
+    pairwise_results = []
+
+    # Since we have only two genes, there is only one pair
+    if len(prefixes) == 2 and len(gene_summaries) == 2:
+        g1, g2 = prefixes
+        s1 = next((d for d in gene_summaries if d["gene"] == g1), None)
+        s2 = next((d for d in gene_summaries if d["gene"] == g2), None)
+        if s1 and s2:
+            fisher_z, fisher_p = fisher_r_comparison(s1["r_value"], s1["n_both_pos"], 
+                                                    s2["r_value"], s2["n_both_pos"])
+
+            cat_list = ["both", "mouse_only", "human_only"]
+            two_prop_results = {cat: two_proportion_ztest(s1[cat], s1["total"], s2[cat], s2["total"]) 
+                                for cat in cat_list}
+
+            pairwise_results.append({
+                "geneA": g1,
+                "geneB": g2,
+                "fisher_z": fisher_z,
+                "fisher_p": fisher_p,
+                "two_prop_both_z": two_prop_results["both"][0],
+                "two_prop_both_p": two_prop_results["both"][1],
+                "two_prop_mouse_z": two_prop_results["mouse_only"][0],
+                "two_prop_mouse_p": two_prop_results["mouse_only"][1],
+                "two_prop_human_z": two_prop_results["human_only"][0],
+                "two_prop_human_p": two_prop_results["human_only"][1],
+            })
+
+    return pairwise_results
+
+def perform_chi_squared_tests(gene_summaries):
+    """
+    Perform chi-squared tests to compare the distribution of motifs across categories
+    between Junb and Sox2.
+    
+    Returns:
+        list of dict: Chi-squared results for the pair, including p-values for
+                      'both', 'mouse_only', and 'human_only'.
+    """
+    chi_squared_results = []
+    pairs = [("Junb", "Sox2")]
+
+    for g1, g2 in pairs:
+        s1 = next((d for d in gene_summaries if d["gene"] == g1), None)
+        s2 = next((d for d in gene_summaries if d["gene"] == g2), None)
+        if s1 is None or s2 is None:
+            print(f"Skipping pair ({g1}, {g2}) due to missing gene summaries.")
+            continue
+
+        # Create contingency table for overall chi-squared test
+        table_overall = np.array([
+            [s1["both"], s1["mouse_only"], s1["human_only"]],
+            [s2["both"], s2["mouse_only"], s2["human_only"]]
+        ])
+
+        # Check for zeros in the contingency table
+        if np.any(table_overall == 0):
+            print(f"Skipping chi-squared test for pair ({g1}, {g2}) due to zero counts in the contingency table.")
+            chi2_overall, p_val_overall = np.nan, np.nan
+        else:
+            try:
+                chi2_overall, p_val_overall, _, _ = chi2_contingency(table_overall)
+            except ValueError as e:
+                print(f"Chi-squared test failed for pair ({g1}, {g2}): {e}")
+                chi2_overall, p_val_overall = np.nan, np.nan
+
+        # Chi-squared tests for individual categories
+        p_values = {}
+        for category in ["both", "mouse_only", "human_only"]:
+            # Create 2x2 contingency table for the category
+            table_cat = np.array([
+                [s1[category], s2[category]],
+                [s1["total"] - s1[category], s2["total"] - s2[category]]
+            ])
+
+            # Check for zeros in the category contingency table
+            if np.any(table_cat == 0):
+                print(f"Skipping chi-squared test for category '{category}' in pair ({g1}, {g2}) due to zero counts.")
+                p_values[f"{category}_p_value"] = np.nan
+                continue
+
+            try:
+                chi2_cat, p_val_cat, _, _ = chi2_contingency(table_cat)
+                p_values[f"{category}_p_value"] = p_val_cat
+            except ValueError as e:
+                print(f"Chi-squared test failed for category '{category}' in pair ({g1}, {g2}): {e}")
+                p_values[f"{category}_p_value"] = np.nan
+
+        chi_squared_results.append({
+            "geneA": g1,
+            "geneB": g2,
+            "chi2_statistic_overall": chi2_overall,
+            "p_value_overall": p_val_overall,
+            **p_values  # Unpack the p-values for 'both', 'mouse_only', 'human_only'
+        })
+
+    return chi_squared_results
+
+def write_stats_csv(gene_summaries, pairwise_results, chi_squared_results, outpath):
+    """
+    Write the statistical analysis results to a CSV file.
+    """
+    df_gene = pd.DataFrame(gene_summaries)[["gene", "both", "mouse_only", "human_only", "total", "r_value", "p_value", "n_both_pos"]]
+    df_pair = pd.DataFrame(pairwise_results)
+    df_chi = pd.DataFrame(chi_squared_results)
+
+    with open(outpath, "w") as f:
+        f.write("Single-Gene Results:\n")
+        df_gene.to_csv(f, index=False)
+        f.write("\n\nPairwise Comparisons:\n")
+        if not df_pair.empty:
+            df_pair.to_csv(f, index=False)
+        else:
+            f.write("No pairwise comparisons.\n")
+
+        f.write("\n\nChi-Squared Test Results:\n")
+        if not df_chi.empty:
+            df_chi.to_csv(f, index=False)
+        else:
+            f.write("No chi-squared test results.\n")
+
+def separate_csv_by_category(prefix, df_merged, outdir="analysis_output"):
+    """
+    Save separate CSV files for each category based on raw scores (>10).
+    """
+    # Extract motifs for each category based on raw scores
+    df_mouse_only = df_merged[(df_merged["score_mouse_raw"] > 10) & (df_merged["score_human_raw"] <= 10)].copy()
+    df_human_only = df_merged[(df_merged["score_human_raw"] > 10) & (df_merged["score_mouse_raw"] <= 10)].copy()
+    df_both = df_merged[(df_merged["score_human_raw"] > 10) & (df_merged["score_mouse_raw"] > 10)].copy()
+
+    # Reorder columns if necessary or keep as is
+    df_mouse_only.to_csv(os.path.join(outdir, f"{prefix}_mouse_only.csv"), index=False)
+    df_human_only.to_csv(os.path.join(outdir, f"{prefix}_human_only.csv"), index=False)
+    df_both.to_csv(os.path.join(outdir, f"{prefix}_both.csv"), index=False)
+
+# =============================================================================
+# Statistical Test Helper Functions
+# =============================================================================
+
+def fisher_r_comparison(r1, n1, r2, n2):
+    """
+    Compare two correlation coefficients using Fisher's z-transformation.
+    
+    Args:
+        r1 (float): Correlation coefficient 1.
+        n1 (int): Sample size 1.
+        r2 (float): Correlation coefficient 2.
+        n2 (int): Sample size 2.
+    
+    Returns:
+        tuple: (z_score, p_value)
+    """
+    if np.isnan(r1) or np.isnan(r2) or n1 <= 3 or n2 <= 3:
+        return np.nan, np.nan
+    z1, z2 = fisher_r_to_z(r1), fisher_r_to_z(r2)
+    se_diff = np.sqrt(1 / (n1 - 3) + 1 / (n2 - 3))
+    z_score = (z1 - z2) / se_diff
+    p_val = 2 * (1 - norm.cdf(abs(z_score)))
+    return z_score, p_val
+
+def fisher_r_to_z(r):
+    """
+    Convert correlation coefficient to Fisher's z.
+    
+    Args:
+        r (float): Correlation coefficient.
+    
+    Returns:
+        float: Fisher's z value.
+    """
+    return 0.5 * np.log((1 + r) / (1 - r))
+
+def two_proportion_ztest(x1, n1, x2, n2):
+    """
+    Perform a two-proportion z-test comparing p1 = x1/n1 vs p2 = x2/n2.
+    
+    Args:
+        x1 (int): Success count in the first group.
+        n1 (int): Sample size of the first group.
+        x2 (int): Success count in the second group.
+        n2 (int): Sample size of the second group.
+        
+    Returns:
+        tuple: (z_val, p_val)
+    """
+    if n1 == 0 or n2 == 0:
+        return np.nan, np.nan
+
+    p1 = x1 / n1
+    p2 = x2 / n2
+    p_pool = (x1 + x2) / (n1 + n2) if (n1 + n2) > 0 else 0
+
+    se = np.sqrt(p_pool * (1 - p_pool) * ((1 / n1) + (1 / n2)))
+    if se == 0:
+        return np.nan, np.nan  # Handle zero standard error explicitly
+
+    z_val = (p1 - p2) / se
+    p_val = 2 * (1 - norm.cdf(abs(z_val)))
+    return z_val, p_val
+
+# =============================================================================
+# Run
+# =============================================================================
+
+if __name__ == "__main__":
+    main()
+
+
+
+############# all genes
+import os
+import pandas as pd
+
+def generate_gene_summary(human_dir, mouse_dir, output_csv, score_threshold=0):
+    """
+    Generate a summary CSV containing the percentage of motifs that are both, mouse only, and human only
+    for each gene in the provided human and mouse directories.
+
+    Args:
+        human_dir (str): Path to the directory containing human gene CSV files.
+        mouse_dir (str): Path to the directory containing mouse gene CSV files.
+        output_csv (str): Path to the output summary CSV file.
+        score_threshold (int, optional): The score threshold to filter motifs. Defaults to 10.
+    """
+    # List all human CSV files
+    human_files = [f for f in os.listdir(human_dir) if f.endswith('.csv')]
+    
+    if not human_files:
+        print(f"No human CSV files found in directory: {human_dir}")
+        return
+    
+    summary_data = []
+    
+    for human_file in human_files:
+        # Extract gene name (assuming filename is 'GENE.csv')
+        gene_name_human = os.path.splitext(human_file)[0]  # Remove '.csv'
+        
+        # Generate corresponding mouse filename (capitalize first letter, lowercase rest)
+        gene_name_mouse = gene_name_human.capitalize()
+        mouse_file = f"{gene_name_mouse}.csv"
+        
+        # Paths to the files
+        human_path = os.path.join(human_dir, human_file)
+        mouse_path = os.path.join(mouse_dir, mouse_file)
+        
+        # Check if mouse file exists
+        if not os.path.exists(mouse_path):
+            print(f"Mouse CSV for gene '{gene_name_human}' not found: {mouse_file}. Skipping.")
+            continue
+        
+        # Load human and mouse data
+        try:
+            df_human = pd.read_csv(human_path)
+            df_mouse = pd.read_csv(mouse_path)
+        except Exception as e:
+            print(f"Error loading CSV for gene '{gene_name_human}': {e}. Skipping.")
+            continue
+        
+        # Ensure 'score' and 'motif_id' columns exist
+        required_columns = {'score', 'motif_id'}
+        if not required_columns.issubset(df_human.columns) or not required_columns.issubset(df_mouse.columns):
+            print(f"'score' or 'motif_id' column missing in one of the CSVs for gene '{gene_name_human}'. Skipping.")
+            continue
+        
+        # Apply score > threshold filter
+        df_human_filtered = df_human[df_human['score'] > score_threshold].copy()
+        df_mouse_filtered = df_mouse[df_mouse['score'] > score_threshold].copy()
+        
+        # Merge human and mouse data on 'motif_id' to identify categories
+        df_merged = pd.merge(
+            df_human_filtered[['motif_id']],
+            df_mouse_filtered[['motif_id']],
+            on='motif_id',
+            how='outer',
+            indicator=True
+        )
+        
+        # Categorize motifs
+        df_merged['category'] = df_merged['_merge'].map({
+            'both': 'both',
+            'left_only': 'human_only',
+            'right_only': 'mouse_only'
+        })
+        
+        # Count categories
+        counts = df_merged['category'].value_counts()
+        both = counts.get('both', 0)
+        mouse_only = counts.get('mouse_only', 0)
+        human_only = counts.get('human_only', 0)
+        total = both + mouse_only + human_only
+        
+        if total == 0:
+            print(f"No motifs retained after filtering for gene '{gene_name_human}'.")
+            percent_both = percent_mouse_only = percent_human_only = 0.0
+        else:
+            # Calculate percentages
+            percent_both = (both / total) * 100
+            percent_mouse_only = (mouse_only / total) * 100
+            percent_human_only = (human_only / total) * 100
+        
+        # Append to summary data
+        summary_data.append({
+            'gene': gene_name_human,
+            'percent_both': round(percent_both, 2),
+            'percent_mouse_only': round(percent_mouse_only, 2),
+            'percent_human_only': round(percent_human_only, 2)
+        })
+        
+        print(f"Processed gene '{gene_name_human}': Both={both} ({percent_both:.2f}%), "
+              f"Mouse Only={mouse_only} ({percent_mouse_only:.2f}%), "
+              f"Human Only={human_only} ({percent_human_only:.2f}%)")
+    
+    if not summary_data:
+        print("No data to write to the summary CSV.")
+        return
+    
+    # Create DataFrame from summary data
+    df_summary = pd.DataFrame(summary_data)
+    
+    # Save to CSV
+    try:
+        df_summary.to_csv(output_csv, index=False)
+        print(f"\nSummary CSV successfully saved to: {output_csv}")
+    except Exception as e:
+        print(f"Error saving summary CSV: {e}")
+
+if __name__ == "__main__":
+    # Define directories
+    human_directory = "per_gene_csvs_non_separated/human"  # Update if different
+    mouse_directory = "per_gene_csvs_non_separated/mouse"  # Update if different
+    output_csv_path = "analysis_output_updated/gene_motif_summary.csv"  # Update if desired
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
+    
+    # Generate the summary
+    generate_gene_summary(human_directory, mouse_directory, output_csv_path, score_threshold=0)
+
+
+
+
+
+
+########## Correlated anticorrelated genes
+import os
+import pandas as pd
+import numpy as np
+from scipy.stats import fisher_exact
+
+def generate_gene_summary(human_dir, mouse_dir, summary_csv, stats_csv, score_threshold=10):
+    """
+    Generate a summary CSV containing the count and percentage of motifs that are both, mouse only,
+    and human only for each gene in the provided human, mouse, and N:RG groups.
+    Also performs Fisher's Exact Test between RG:RG vs RG:N and RG:RG vs N:RG.
+    
+    Args:
+        human_dir (str): Path to the directory containing human gene CSV files.
+        mouse_dir (str): Path to the directory containing mouse gene CSV files.
+        summary_csv (str): Path to the output summary CSV file.
+        stats_csv (str): Path to the output statistical test CSV file.
+        score_threshold (int, optional): The score threshold to filter motifs. Defaults to 10.
+    """
+    # Define gene groups
+    rg_rg_genes = {"SOX9", "LITAF", "VIM", "SOX2", "SFRP1", "REXO2", "TTYH1", "ALDOC", "OAT", "GLI3"}
+    rg_n_genes = {"LRRTM3", "APBB2", "FBXO32", "GRB14", "MGAT4C", "JUNB", "CRYAB", "GGCT", "CASP3", "CHST10"}
+    n_rg_genes = {"SORCS1", "PRSS23", "KLHL32", "PRKCB", "NR4A2", "EIF4EBP1", "MPP6", "PCDH10", "GAREM1", "GSTA4"}
+
+    # List all human CSV files
+    try:
+        human_files = [f for f in os.listdir(human_dir) if f.endswith('.csv')]
+    except FileNotFoundError:
+        print(f"Human directory not found: {human_dir}")
+        return
+
+    if not human_files:
+        print(f"No human CSV files found in directory: {human_dir}")
+        return
+
+    summary_data = []
+
+    for human_file in human_files:
+        # Extract gene name (assuming filename is 'GENE.csv')
+        gene_name_human = os.path.splitext(human_file)[0]  # Remove '.csv'
+
+        # Determine gene group
+        gene_upper = gene_name_human.upper()
+        if gene_upper in rg_rg_genes:
+            group = "RG:RG"
+        elif gene_upper in rg_n_genes:
+            group = "RG:N"
+        elif gene_upper in n_rg_genes:
+            group = "N:RG"
+        else:
+            print(f"Gene '{gene_name_human}' not found in any predefined group. Skipping.")
+            continue
+
+        # Generate corresponding mouse filename (capitalize first letter, lowercase rest)
+        gene_name_mouse = gene_name_human.capitalize()
+        mouse_file = f"{gene_name_mouse}.csv"
+
+        # Paths to the files
+        human_path = os.path.join(human_dir, human_file)
+        mouse_path = os.path.join(mouse_dir, mouse_file)
+
+        # Check if mouse file exists
+        if not os.path.exists(mouse_path):
+            print(f"Mouse CSV for gene '{gene_name_human}' not found: {mouse_file}. Skipping.")
+            continue
+
+        # Load human and mouse data
+        try:
+            df_human = pd.read_csv(human_path)
+            df_mouse = pd.read_csv(mouse_path)
+        except Exception as e:
+            print(f"Error loading CSV for gene '{gene_name_human}': {e}. Skipping.")
+            continue
+
+        # Ensure 'score' and 'motif_id' columns exist
+        required_columns = {'score', 'motif_id'}
+        if not required_columns.issubset(df_human.columns) or not required_columns.issubset(df_mouse.columns):
+            print(f"'score' or 'motif_id' column missing in one of the CSVs for gene '{gene_name_human}'. Skipping.")
+            continue
+
+        # Apply score > threshold filter
+        df_human_filtered = df_human[df_human['score'] > score_threshold].copy()
+        df_mouse_filtered = df_mouse[df_mouse['score'] > score_threshold].copy()
+
+        # Merge human and mouse data on 'motif_id' to identify categories
+        df_merged = pd.merge(
+            df_human_filtered[['motif_id']],
+            df_mouse_filtered[['motif_id']],
+            on='motif_id',
+            how='outer',
+            indicator=True
+        )
+
+        # Categorize motifs
+        df_merged['category'] = df_merged['_merge'].map({
+            'both': 'both',
+            'left_only': 'human_only',
+            'right_only': 'mouse_only'
+        })
+
+        # Count categories
+        counts = df_merged['category'].value_counts()
+        both = counts.get('both', 0)
+        mouse_only = counts.get('mouse_only', 0)
+        human_only = counts.get('human_only', 0)
+        total = both + mouse_only + human_only
+
+        if total == 0:
+            print(f"No motifs retained after filtering for gene '{gene_name_human}'.")
+            percent_both = percent_mouse_only = percent_human_only = 0.0
+        else:
+            # Calculate percentages
+            percent_both = (both / total) * 100
+            percent_mouse_only = (mouse_only / total) * 100
+            percent_human_only = (human_only / total) * 100
+
+        # Append to summary data
+        summary_data.append({
+            'gene': gene_name_human,
+            'group': group,
+            'count_both': both,
+            'count_mouse_only': mouse_only,
+            'count_human_only': human_only,
+            'percent_both': round(percent_both, 2),
+            'percent_mouse_only': round(percent_mouse_only, 2),
+            'percent_human_only': round(percent_human_only, 2)
+        })
+
+        print(f"Processed gene '{gene_name_human}': Group={group}, Both={both} ({percent_both:.2f}%), "
+              f"Mouse Only={mouse_only} ({percent_mouse_only:.2f}%), "
+              f"Human Only={human_only} ({percent_human_only:.2f}%)")
+
+    if not summary_data:
+        print("No data to write to the summary CSV.")
+    else:
+        # Create DataFrame from summary data
+        df_summary = pd.DataFrame(summary_data)
+
+        # Save the summary data to CSV
+        try:
+            df_summary.to_csv(summary_csv, index=False)
+            print(f"\nSummary CSV successfully saved to: {summary_csv}")
+        except Exception as e:
+            print(f"Error saving summary CSV: {e}")
+            return
+
+        # Perform Fisher's Exact tests
+        # Define group comparisons
+        comparisons = [
+            ("RG:RG", "RG:N"),
+            ("RG:RG", "N:RG")
+        ]
+
+        # Initialize p-values list
+        p_values_list = []
+
+        for comp in comparisons:
+            group1, group2 = comp
+            df_group1 = df_summary[df_summary['group'] == group1]
+            df_group2 = df_summary[df_summary['group'] == group2]
+
+            if df_group1.empty or df_group2.empty:
+                print(f"One of the groups in comparison {group1} vs {group2} has no data. Skipping.")
+                p_values_list.append({
+                    'comparison': f"{group1} vs {group2}",
+                    'p_value_both': np.nan,
+                    'p_value_mouse_only': np.nan,
+                    'p_value_human_only': np.nan
+                })
+                continue
+
+            # Aggregate counts for each category
+            count_both_1 = df_group1['count_both'].sum()
+            count_both_2 = df_group2['count_both'].sum()
+
+            count_mouse_only_1 = df_group1['count_mouse_only'].sum()
+            count_mouse_only_2 = df_group2['count_mouse_only'].sum()
+
+            count_human_only_1 = df_group1['count_human_only'].sum()
+            count_human_only_2 = df_group2['count_human_only'].sum()
+
+            # Fisher's Exact Test for 'Both' category
+            # Construct 2x2 table: [Group1 Both, Group2 Both] vs [Group1 Not Both, Group2 Not Both]
+            not_both_1 = df_group1['count_both'].sum() - count_both_1
+            not_both_2 = df_group2['count_both'].sum() - count_both_2
+            contingency_both = np.array([[count_both_1, count_both_2],
+                                         [not_both_1, not_both_2]])
+            try:
+                _, p_both = fisher_exact(contingency_both)
+            except Exception as e:
+                print(f"Fisher's Exact Test failed for 'both' category between {group1} and {group2}: {e}")
+                p_both = np.nan
+
+            # Fisher's Exact Test for 'Mouse Only' category
+            not_mouse_only_1 = df_group1['count_mouse_only'].sum() - count_mouse_only_1
+            not_mouse_only_2 = df_group2['count_mouse_only'].sum() - count_mouse_only_2
+            contingency_mouse = np.array([[count_mouse_only_1, count_mouse_only_2],
+                                          [not_mouse_only_1, not_mouse_only_2]])
+            try:
+                _, p_mouse = fisher_exact(contingency_mouse)
+            except Exception as e:
+                print(f"Fisher's Exact Test failed for 'mouse_only' category between {group1} and {group2}: {e}")
+                p_mouse = np.nan
+
+            # Fisher's Exact Test for 'Human Only' category
+            not_human_only_1 = df_group1['count_human_only'].sum() - count_human_only_1
+            not_human_only_2 = df_group2['count_human_only'].sum() - count_human_only_2
+            contingency_human = np.array([[count_human_only_1, count_human_only_2],
+                                          [not_human_only_1, not_human_only_2]])
+            try:
+                _, p_human = fisher_exact(contingency_human)
+            except Exception as e:
+                print(f"Fisher's Exact Test failed for 'human_only' category between {group1} and {group2}: {e}")
+                p_human = np.nan
+
+            # Append p-values to list
+            p_values_list.append({
+                'comparison': f"{group1} vs {group2}",
+                'p_value_both': p_both,
+                'p_value_mouse_only': p_mouse,
+                'p_value_human_only': p_human
+            })
+
+        # Create p-values DataFrame
+        df_p_values = pd.DataFrame(p_values_list)
+
+        # Apply Bonferroni correction for multiple comparisons
+        # Total number of tests = number of comparisons * number of categories
+        num_tests = len(comparisons) * 3
+        alpha = 0.05
+        bonferroni_alpha = alpha / num_tests
+
+        # Add significance columns
+        df_p_values['significant_both'] = df_p_values['p_value_both'] < bonferroni_alpha
+        df_p_values['significant_mouse_only'] = df_p_values['p_value_mouse_only'] < bonferroni_alpha
+        df_p_values['significant_human_only'] = df_p_values['p_value_human_only'] < bonferroni_alpha
+
+        # Save statistical test results to CSV
+        try:
+            df_p_values.to_csv(stats_csv, index=False)
+            print(f"Statistical test results successfully saved to: {stats_csv}")
+            print(f"\nBonferroni corrected alpha: {bonferroni_alpha:.5f}")
+        except Exception as e:
+            print(f"Error saving statistical test results CSV: {e}")
+
+def main():
+    # Define directories
+    human_directory = "per_gene_csvs_non_separated/human"  # Update if different
+    mouse_directory = "per_gene_csvs_non_separated/mouse"  # Update if different
+    summary_csv_path = "analysis_output/gene_motif_summary.csv"  # Update if desired
+    stats_csv_path = "analysis_output/statistical_tests.csv"  # Update if desired
+
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(summary_csv_path), exist_ok=True)
+
+    # Generate the summary and statistical tests
+    generate_gene_summary(
+        human_dir=human_directory,
+        mouse_dir=mouse_directory,
+        summary_csv=summary_csv_path,
+        stats_csv=stats_csv_path,
+        score_threshold=0
+    )
+
+if __name__ == "__main__":
+    main()
