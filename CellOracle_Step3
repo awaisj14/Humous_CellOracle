@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Feb 22 18:11:27 2023
+
+@author: javed
+"""
+
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import scanpy as sc
+import celloracle as co
+
+# Parameters (easy to change)
+goi = "JUNB"              # Gene of interest
+perturbation_type = "KO"  # "KO" or "OE"
+
+# Create a folder to save plots
+save_folder = f"{goi}_{perturbation_type}"
+os.makedirs(save_folder, exist_ok=True)
+
+# Plot settings
+plt.rcParams["figure.figsize"] = [6, 6]
+plt.rcParams["savefig.dpi"] = 600
+
+# Set scanpy figure directory
+sc.settings.figdir = save_folder
+
+# Load data
+oracle = co.load_hdf5("Paul_15_data_v2.celloracle.oracle")
+
+# Determine perturbation value based on perturbation_type
+if perturbation_type == "KO":
+    perturb_value = 0.0
+elif perturbation_type == "OE":
+    gene_expression = sc.get.obs_df(oracle.adata, keys=[goi], layer="imputed_count")[goi]
+    perturb_value = gene_expression.max()
+else:
+    raise ValueError("perturbation_type must be 'KO' or 'OE'")
+
+# Perform simulation and embedding calculations
+links = co.load_hdf5("links_v2.celloracle.links")
+links.filter_links()
+oracle.get_cluster_specific_TFdict_from_Links(links_object=links)
+oracle.fit_GRN_for_simulation(alpha=10, use_cluster_specific_TFdict=True)
+perturb_condition = {goi: perturb_value}
+oracle.simulate_shift(perturb_condition=perturb_condition, n_propagation=3)
+oracle.estimate_transition_prob(n_neighbors=200, knn_random=True, sampled_fraction=1)
+oracle.calculate_embedding_shift(sigma_corr=0.05)
+
+arrow_scale_factor = 250
+
+# Define custom color mapping based on direction
+def get_custom_color(angle):
+    """
+    Map direction (angle in radians) to a specific color.
+    """
+    if -3 * np.pi / 4 <= angle < -np.pi / 4:  # South
+        return "#C7C067"
+    elif -np.pi / 4 <= angle < np.pi / 4:  # East
+        return "#DE3B89"
+    elif np.pi / 4 <= angle < 3 * np.pi / 4:  # North
+        return "#61C6AD"
+    else:  # West
+        return "#CEA2CE"
+
+# Convert hex colors to RGB
+def hex_to_rgb(hex_color):
+    """
+    Convert a hex color (e.g., '#C7C067') to an RGB tuple (scaled 0-1 for matplotlib).
+    """
+    return mcolors.to_rgba(hex_color)[:3]
+
+if hasattr(oracle, "delta_embedding"):
+    coords = oracle.adata.obsm.get("X_draw_graph_fa", oracle.adata.obsm[oracle.embedding_name])
+    X_coords, Y_coords = coords[:, 0], coords[:, 1]
+    U, V = oracle.delta_embedding[:, 0], oracle.delta_embedding[:, 1]
+    
+    magnitudes = np.sqrt(U**2 + V**2)
+    mask = magnitudes > 0
+    if np.sum(mask) > 0:
+        X_filtered, Y_filtered = X_coords[mask], Y_coords[mask]
+        U_filtered, V_filtered = U[mask] * arrow_scale_factor, V[mask] * arrow_scale_factor
+
+        angles = np.arctan2(V_filtered, U_filtered)
+        arrow_colors = [get_custom_color(angle) for angle in angles]
+
+        # Plot scaled cell positions and arrows
+        fig_fa, ax_fa = plt.subplots(figsize=(6, 6))
+        ax_fa.scatter(X_coords, Y_coords, s=5, color="lightgray", alpha=0.7, label="Cells")
+        ax_fa.quiver(X_filtered, Y_filtered, U_filtered, V_filtered, color=arrow_colors, pivot="tail", angles="xy", scale_units="xy", scale=1)
+        ax_fa.set_title(f"Simulated shift vectors: {goi} {perturbation_type}")
+        ax_fa.set_xlabel("FA embedding 1")
+        ax_fa.set_ylabel("FA embedding 2")
+        ax_fa.set_aspect("equal", "box")
+        plt.savefig(os.path.join(save_folder, f"simulation_flow_{goi}_{perturbation_type}_custom_colors.pdf"))
+        plt.close(fig_fa)
+
+        # Plot direction legend
+        fig_legend, ax_legend = plt.subplots(figsize=(6, 6))
+        N = 512
+        x = np.linspace(-1, 1, N)
+        y = np.linspace(-1, 1, N)
+        X_grid, Y_grid = np.meshgrid(x, y)
+        Angle_grid = np.arctan2(Y_grid, X_grid)
+
+        # Initialize a color grid for RGB values
+        Color_grid = np.zeros(X_grid.shape + (3,))
+        for i in range(X_grid.shape[0]):
+            for j in range(X_grid.shape[1]):
+                angle = Angle_grid[i, j]
+                if X_grid[i, j]**2 + Y_grid[i, j]**2 <= 1:  # Inside the circle
+                    hex_color = get_custom_color(angle)
+                    Color_grid[i, j] = hex_to_rgb(hex_color)
+                else:
+                    Color_grid[i, j] = (1, 1, 1)  # White for outside the circle
+
+        # Display the direction legend
+        ax_legend.imshow(Color_grid, extent=(-1, 1, -1, 1), origin="lower")
+        ax_legend.axis("off")
+        ax_legend.set_title("Direction Legend")
+        plt.savefig(os.path.join(save_folder, f"direction_legend_{goi}_{perturbation_type}.pdf"))
+        plt.close(fig_legend)
+else:
+    print("No delta_embedding attribute found. Please check the version of celloracle or documentation.")
