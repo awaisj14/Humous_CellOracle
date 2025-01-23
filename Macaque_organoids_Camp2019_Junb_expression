@@ -1,0 +1,62 @@
+library(Seurat)
+library(Matrix)
+library(ggplot2)
+# Download this: https://www.ebi.ac.uk/biostudies/files/E-MTAB-7552/macaque_cell_counts_consensus.mtx
+# Load the counts matrix
+counts <- readMM("/Users/javed/Documents/Human_multiome/Macaque/macaque_cell_counts_consensus.mtx")
+
+# https://www.ebi.ac.uk/biostudies/files/E-MTAB-7552/metadata_macaque_cells.tsv
+# Load metadata
+metadata <- read.table("/Users/javed/Documents/Human_multiome/Macaque/metadata_macaque_cells.tsv", header = TRUE, sep = "\t", row.names = 1)
+
+# https://www.ebi.ac.uk/biostudies/files/E-MTAB-7552/genes_consensus.txt
+# Load genes (assuming columns: V1 = Ensembl ID, V2 = Gene Symbol)
+genes <- read.table("/Users/javed/Documents/Human_multiome/Macaque/genes_consensus.txt", header = FALSE, stringsAsFactors = FALSE)
+colnames(genes) <- c("Ensembl_ID", "Gene_Symbol")
+
+
+# Identify duplicated gene symbols
+duplicated_genes <- genes$Gene_Symbol[duplicated(genes$Gene_Symbol) | duplicated(genes$Gene_Symbol, fromLast = TRUE)]
+
+# Create a mapping of Ensembl IDs to unique gene symbols
+gene_name_mapping <- genes
+dup_count <- list()  # Track duplicate occurrences
+
+for (i in 1:nrow(gene_name_mapping)) {
+  gene <- gene_name_mapping$Gene_Symbol[i]
+  
+  # If gene is duplicated, append a unique number
+  if (gene %in% duplicated_genes) {
+    if (!is.null(dup_count[[gene]])) {
+      dup_count[[gene]] <- dup_count[[gene]] + 1
+    } else {
+      dup_count[[gene]] <- 1
+    }
+    gene_name_mapping$Gene_Symbol[i] <- paste0(gene, "_", dup_count[[gene]])
+  }
+}
+
+# Assign Ensembl IDs as row names
+rownames(counts) <- gene_name_mapping$Gene_Symbol  # Use unique gene symbols now
+colnames(counts) <- rownames(metadata)  # Ensure cell names match
+
+# Convert to sparse format
+counts <- as(counts, "dgCMatrix")
+
+
+seurat_obj <- CreateSeuratObject(counts = counts, meta.data = metadata)
+
+
+# Save the list of renamed genes
+write.table(duplicated_genes, file = "/Users/javed/Documents/Human_multiome/Macaque/renamed_genes.tsv", sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+
+seurat_obj <- NormalizeData(seurat_obj)
+
+Idents(seurat_obj) <- "PredCellType"
+
+seurat_obj <- subset(seurat_obj, ident = c("RG","IPC","EN"))
+# Ensure 'PredCellType' exists in metadata
+seurat_obj$PredCellType <- factor(seurat_obj$PredCellType, levels = c("RG", "IPC", "EN"))
+VlnPlot(seurat_obj, features = "JUNB", pt.size = 0.1, group.by = "PredCellType", slot = "counts") + theme_minimal()
+
+saveRDS(seurat_obj, "/Users/javed/Documents/Human_multiome/Macaque/Macaque_Camp2019_only_RG_IPC_EN.rds")
