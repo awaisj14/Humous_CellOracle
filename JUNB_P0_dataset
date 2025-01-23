@@ -1,0 +1,1554 @@
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+set.seed(1234)
+library(DoubletFinder)
+library(tidyr)
+library(tidyverse)
+library(qs)
+library(scDblFinder)
+library(SingleCellExperiment)
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+color.predict = c("green4", 
+                  "palegreen3",
+                  "#20b2aa"
+) 
+
+
+
+
+color.predict_spatial = c('4'="green4", 
+                          '3'="palegreen3",
+                          '8'="#20b2aa"
+) 
+
+
+options(Seurat.object.assay.version = 'v3')
+mapal <- colorRampPalette(RColorBrewer::brewer.pal(4,"RdBu"))(256)
+
+packages <- c("Seurat", "ggplot2", "tidyr", "readr"
+              , "plyr", "stringr", "harmony"
+              , "cowplot", "reshape2","ggpubr"
+              , "gsubfn", "tibble", "gplots"
+              , "Matrix", "dplyr", "pbapply", "schex"
+              , "UpSetR", "extraDistr", "ape"
+              , "stats"
+)
+lapply(packages, library, character.only = TRUE)
+
+
+
+
+####### Control dataset #######
+data <- Read10X_h5('/Users/Javed/Documents/JUNB_P0/Control/filtered_feature_bc_matrix.h5')
+metadata <- read.csv(
+  file = "/Users/Javed/Documents/JUNB_P0/Control/metrics_summary.csv",
+  header = TRUE,
+  row.names = 1
+)
+pbmc <- CreateSeuratObject(
+  counts = data,
+  assay = "RNA",
+  project = "Control_E15_P0",meta.data = metadata
+)
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^mt-")
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+pbmc <- subset(x = pbmc,subset = nCount_RNA < 30000)
+pbmc <- subset(x = pbmc,subset = nCount_RNA > 500)
+
+pbmc <- subset(x = pbmc,subset = nFeature_RNA > 1000)
+pbmc <- subset(x = pbmc,subset = percent.mt < 10)
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(pbmc), 10)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+pbmc <- FindNeighbors(pbmc, dims = 1:20)
+pbmc <- FindClusters(pbmc, resolution = 1)
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+pbmc$clusters <- pbmc$seurat_clusters
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters")
+FeaturePlot(pbmc, features = "Rbfox3")
+
+tenX_matrix <- "/Users/javed/Documents/JUNB_P0/Control/matrix/"
+out <- "/Users/javed/Documents/JUNB_P0/Control/out_dblfinder"
+print(paste0("Using the following counts directory: ", tenX_matrix))
+## make sure the directory exists ###
+dir.create(out, recursive = TRUE)
+
+## Read in Data ##
+
+sce <- as.SingleCellExperiment(pbmc)
+doublet_ratio <- ncol(sce)/1000*0.008
+sce <- scDblFinder(sce, dbr=doublet_ratio)
+
+### Make a dataframe of the results ###
+results <- data.frame("Barcode" = rownames(colData(sce)), "scDblFinder_DropletType" = sce$scDblFinder.class, "scDblFinder_Score" = sce$scDblFinder.score)
+
+
+write_delim(results, path = paste0(out,"/scDblFinder_doublets_singlets.tsv"), delim = "\t")
+
+### Calculate number of doublets and singlets ###
+summary <- as.data.frame(table(results$scDblFinder_DropletType))
+colnames(summary) <- c("Classification", "Droplet N")
+write_delim(summary, paste0(out,"/scDblFinder_doublet_summary.tsv"), "\t")
+pbmc <- AddMetaData(pbmc, results$scDblFinder_DropletType, col.name = 'scDblFinder_DropletType')
+table(pbmc$scDblFinder_DropletType)
+Idents(pbmc) <- "scDblFinder_DropletType"
+pbmc <- subset(pbmc, ident = "singlet")
+DimPlot(pbmc, reduction = "umap", group.by = "scDblFinder_DropletType")
+
+Idents(pbmc) <- "seurat_clusters"
+differential.genes <- FindAllMarkers(pbmc,only.pos=TRUE, min.pct= 0.25,logfc.threshold=0.25,test.use='LR',latent.vars='nCount_RNA', slot= "scale.data")
+topgenes <- differential.genes %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC)
+DoHeatmap(object = pbmc,features = c(topgenes$gene), size = 3, disp.max = 1.4, disp.min = -1.5)+ scale_fill_gradient2( low = rev(c('#cbe2ee','#4b97c6','#0e447c')), mid = "white", high = rev(c('#a91529','#da6954','#fbd2bc')), midpoint = 0, guide = "colourbar", aesthetics = "fill")
+
+FeaturePlot(pbmc, features = "Mki67")
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters", cols = c25)
+
+pbmc <- RenameIdents(
+  object = pbmc,
+  c('0' = 'Neurons','1' = 'Neurons','2' = 'Astrocytes','3' = 'Astrocytes',
+    '4' = 'Neurons', "5" = "Neurons","6" = "Cycling glial cells","7" = "Oligodendrocytes","8" = "Neurons","9" = "Interneurons","10" = "Microglia","11" = "Cycling glial cells",
+    "12" = "Microglia"
+  ))
+
+pbmc$clusters <- pbmc@active.ident
+DimPlot(pbmc, reduction = "umap", group.by = "clusters", cols = c25)
+
+saveRDS(pbmc,"/Users/javed/Documents/JUNB_P0/Control/Control_pre_subset.rds")
+
+pbmc <- subset(pbmc, ident = c("Microglia"), invert = T)
+
+pbmc <- RunUMAP(pbmc, dims = 1:20)
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters", cols = c25)
+
+Idents(pbmc) <- "seurat_clusters"
+differential.genes <- FindAllMarkers(pbmc,only.pos=TRUE, min.pct= 0.25,logfc.threshold=0.25,test.use='LR',latent.vars='nCount_RNA', slot= "scale.data")
+topgenes <- differential.genes %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC)
+DoHeatmap(object = pbmc,features = c(topgenes$gene), size = 3, disp.max = 1.4, disp.min = -1.5)+ scale_fill_gradient2( low = rev(c('#cbe2ee','#4b97c6','#0e447c')), mid = "white", high = rev(c('#a91529','#da6954','#fbd2bc')), midpoint = 0, guide = "colourbar", aesthetics = "fill")
+
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters", cols = c25)
+FeaturePlot(pbmc, features = "Sox9")
+
+pbmc <- RenameIdents(
+  object = pbmc,
+  c('0' = 'Neurons','1' = 'Astrocytes','2' = 'Neurons','3' = 'Neurons',
+    '4' = 'Astrocytes', "5" = "Neurons","6" = "Cycling glial cells","7" = "Oligodendrocytes","8" = "Astrocytes","9" = "Neurons","10" = "Interneurons","11" = "Cycling glial cells",
+    "12" = "Microglia"
+  ))
+
+pbmc$clusters <- pbmc@active.ident
+DimPlot(pbmc, reduction = "umap", group.by = "clusters", cols = c25)
+pbmc <- FindNeighbors(pbmc, dims = 1:20)
+
+
+
+d <- as.data.frame(colnames(pbmc))
+r = gsub(pattern = "-1", replacement = "", d$`colnames(pbmc)`)
+d$V1 <- r
+d$Duplicate <- d$V1
+d$`colnames(pbmc)` <- NULL
+write.table(d, "/Users/Javed/Documents/JUNB_P0/Control/whitelist.txt", col.names = FALSE,sep='\t', row.names = FALSE,  quote = FALSE)
+
+FeaturePlot(pbmc, features = "hJUNB")
+
+saveRDS(pbmc,"/Users/javed/Documents/JUNB_P0/Control/Control_pre_cloneID.rds")
+
+pbmc <- readRDS("/Users/javed/Documents/JUNB_P0/Control/Control_pre_cloneID.rds")
+
+#Lineage assignment
+library(readr)
+library(philentropy)
+library(dendextend)
+sparse_matrix <-readr::read_csv("/Users/Javed/Documents/JUNB_P0/Control/Bars/Bar2_NREADS10_UMI4_HAMMING3_seurat.csv")
+sparse_matrix <- as.data.frame(sparse_matrix)
+head(sparse_matrix)
+sparse_matrix$...1 <- NULL
+# duplicate_cellbcs <- sparse_matrix$cellbc[duplicated(sparse_matrix$cellbc)] # comment out if you want to remove duplicates
+# sparse_matrix <- subset(sparse_matrix, !(cellbc %in% duplicate_cellbcs))
+rownames(sparse_matrix) <- sparse_matrix$cellbc
+sparse_matrix$cellbc <- NULL
+dist_mat <- philentropy::distance(sparse_matrix, method = 'jaccard', use.row.names = TRUE)
+dist_mat <- as.dist(dist_mat)
+hclust_avg <- hclust(dist_mat, method = 'average')
+plot(hclust_avg, hang = -1, cex = 0.1)
+abline(h = 0.999, col = 'red')
+cut_avg <- cutree(hclust_avg, h = 0.999) # see section below if this command doesn't execute
+clones <- stack(cut_avg)
+clones <- setNames(stack(cut_avg), c('cloneID', 'cellbc'))
+n_occur <- data.frame(table(clones$cloneID))
+multicc <- n_occur[n_occur$Freq >1,]
+# output table of clones
+write.csv(clones, file = "/Users/Javed/Documents/JUNB_P0/Control/Bars/Bar2_NREADS10_UMI4_HAMMING3_cloneid.csv")
+clones <- read.csv("/Users/Javed/Documents/JUNB_P0/Control/Bars/Bar2_NREADS10_UMI4_HAMMING3_cloneid.csv", row.names = 1)
+clones$cellbc <- paste(clones$cellbc, "-1", sep = "")
+clones$cloneID <- paste(clones$cloneID, "0011", sep = "")
+head(clones$cellbc)
+merge.transcr.ling.may.pB2 <- function(pbmc, clones,new.col="cloneID", ... ){
+  cells <- intersect(clones$cellbc,colnames(pbmc))
+  rownames(clones) <- clones$cellbc
+  pbmc@meta.data[,new.col] <- "No LBC"
+  pbmc@meta.data[cells,new.col] <- clones[cells, new.col]
+  Idents(object = pbmc) <- new.col
+  pbmc@meta.data[WhichCells(pbmc,idents = "No LBC"),new.col] <- NA
+  return(pbmc)
+}
+pbmc <-  merge.transcr.ling.may.pB2(pbmc,clones, new.col = "cloneID")
+head(pbmc@meta.data)
+pbmc$cloneID
+Con <- pbmc
+saveRDS(Con, "/Users/javed/Documents/JUNB_P0/Control/Control_post_cloneID.rds")
+
+
+
+
+
+
+
+
+
+
+
+####### Junb dataset #######
+data <- Read10X_h5('/Users/Javed/Documents/JUNB_P0/Junb/filtered_feature_bc_matrix.h5')
+metadata <- read.csv(
+  file = "/Users/Javed/Documents/JUNB_P0/Junb/metrics_summary.csv",
+  header = TRUE,
+  row.names = 1
+)
+pbmc <- CreateSeuratObject(
+  counts = data,
+  assay = "RNA",
+  project = "Junb_E15_P0",meta.data = metadata
+)
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^mt-")
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+pbmc <- subset(x = pbmc,subset = nCount_RNA < 30000)
+pbmc <- subset(x = pbmc,subset = nCount_RNA > 500)
+
+pbmc <- subset(x = pbmc,subset = nFeature_RNA > 1000)
+pbmc <- subset(x = pbmc,subset = percent.mt < 10)
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(pbmc), 10)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+pbmc <- FindNeighbors(pbmc, dims = 1:20)
+pbmc <- FindClusters(pbmc, resolution = 1)
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+pbmc$clusters <- pbmc$seurat_clusters
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters")
+FeaturePlot(pbmc, features = "Rbfox3")
+
+tenX_matrix <- "/Users/javed/Documents/JUNB_P0/Junb/matrix/"
+out <- "/Users/javed/Documents/JUNB_P0/Junb/out_dblfinder"
+print(paste0("Using the following counts directory: ", tenX_matrix))
+## make sure the directory exists ###
+dir.create(out, recursive = TRUE)
+
+## Read in Data ##
+
+sce <- as.SingleCellExperiment(pbmc)
+doublet_ratio <- ncol(sce)/1000*0.008
+sce <- scDblFinder(sce, dbr=doublet_ratio)
+
+### Make a dataframe of the results ###
+results <- data.frame("Barcode" = rownames(colData(sce)), "scDblFinder_DropletType" = sce$scDblFinder.class, "scDblFinder_Score" = sce$scDblFinder.score)
+
+
+write_delim(results, path = paste0(out,"/scDblFinder_doublets_singlets.tsv"), delim = "\t")
+
+### Calculate number of doublets and singlets ###
+summary <- as.data.frame(table(results$scDblFinder_DropletType))
+colnames(summary) <- c("Classification", "Droplet N")
+write_delim(summary, paste0(out,"/scDblFinder_doublet_summary.tsv"), "\t")
+pbmc <- AddMetaData(pbmc, results$scDblFinder_DropletType, col.name = 'scDblFinder_DropletType')
+table(pbmc$scDblFinder_DropletType)
+Idents(pbmc) <- "scDblFinder_DropletType"
+pbmc <- subset(pbmc, ident = "singlet")
+DimPlot(pbmc, reduction = "umap", group.by = "scDblFinder_DropletType")
+
+Idents(pbmc) <- "seurat_clusters"
+differential.genes <- FindAllMarkers(pbmc,only.pos=TRUE, min.pct= 0.25,logfc.threshold=0.25,test.use='LR',latent.vars='nCount_RNA', slot= "scale.data")
+topgenes <- differential.genes %>% group_by(cluster) %>% top_n(n = 20, wt = avg_log2FC)
+DoHeatmap(object = pbmc,features = c(topgenes$gene), size = 3, disp.max = 1.4, disp.min = -1.5)+ scale_fill_gradient2( low = rev(c('#cbe2ee','#4b97c6','#0e447c')), mid = "white", high = rev(c('#a91529','#da6954','#fbd2bc')), midpoint = 0, guide = "colourbar", aesthetics = "fill")
+
+saveRDS(pbmc,"/Users/javed/Documents/JUNB_P0/Junb/Junb_pre_subset.rds")
+
+FeaturePlot(pbmc, features = "Mki67")
+DimPlot(pbmc, reduction = "umap", group.by = "seurat_clusters")
+
+pbmc <- RenameIdents(
+  object = pbmc,
+  c('0' = 'Neurons','1' = 'Astrocytes','2' = 'Neurons','3' = 'Neurons',
+    '4' = 'Neurons', "5" = "Cycling glial cells","6" = "Neurons","7" = "Astrocytes","8" = "Neurons","9" = "Neurons",
+    "10" = "Neurons","11" = "Astrocytes",
+    "12" = "Interneurons","13" = "Oligodendrocytes","14" = "Astrocytes","15" = "Cycling glial cells_INTERESTING",
+    "16" = "Oligodendrocytes", "17" = "Interneurons", "18" = "Cycling glial cells", "19" = "Cycling glial cells_INTERESTING_WITH_NEUROG2",
+    "20" = "Astrocytes","21" = "Neurons","22" = "Astrocytes","23" = "Cycling glial cells","24" = "Astrocytes",
+    "25" = "Microglia"
+  ))
+
+pbmc$clusters <- pbmc@active.ident
+DimPlot(pbmc, reduction = "umap", group.by = "clusters", cols = c25)
+
+
+Idents(pbmc) <- "clusters"
+pbmc <- subset(pbmc, ident = "Microglia",invert = T)
+
+
+
+d <- as.data.frame(colnames(pbmc))
+r = gsub(pattern = "-1", replacement = "", d$`colnames(pbmc)`)
+d$V1 <- r
+d$Duplicate <- d$V1
+d$`colnames(pbmc)` <- NULL
+write.table(d, "/Users/Javed/Documents/JUNB_P0/Junb/whitelist.txt", col.names = FALSE,sep='\t', row.names = FALSE,  quote = FALSE)
+
+FeaturePlot(pbmc, features = "Junb", order = T, pt.size = 1)
+
+saveRDS(pbmc,"/Users/javed/Documents/JUNB_P0/Junb/Junb_pre_cloneID.rds")
+
+pbmc <- readRDS("/Users/javed/Documents/JUNB_P0/Junb/Junb_pre_cloneID.rds")
+
+
+#Lineage assignment
+library(readr)
+library(philentropy)
+library(dendextend)
+sparse_matrix <-readr::read_csv("/Users/Javed/Documents/JUNB_P0/Junb/Bars/Bar2_NREADS10_UMI4_HAMMING3_seurat.csv")
+sparse_matrix <- as.data.frame(sparse_matrix)
+head(sparse_matrix)
+sparse_matrix$...1 <- NULL
+# duplicate_cellbcs <- sparse_matrix$cellbc[duplicated(sparse_matrix$cellbc)] # comment out if you want to remove duplicates
+# sparse_matrix <- subset(sparse_matrix, !(cellbc %in% duplicate_cellbcs))
+rownames(sparse_matrix) <- sparse_matrix$cellbc
+sparse_matrix$cellbc <- NULL
+dist_mat <- philentropy::distance(sparse_matrix, method = 'jaccard', use.row.names = TRUE)
+dist_mat <- as.dist(dist_mat)
+hclust_avg <- hclust(dist_mat, method = 'average')
+plot(hclust_avg, hang = -1, cex = 0.1)
+abline(h = 0.999, col = 'red')
+cut_avg <- cutree(hclust_avg, h = 0.999) # see section below if this command doesn't execute
+clones <- stack(cut_avg)
+clones <- setNames(stack(cut_avg), c('cloneID', 'cellbc'))
+n_occur <- data.frame(table(clones$cloneID))
+multicc <- n_occur[n_occur$Freq >1,]
+# output table of clones
+write.csv(clones, file = "/Users/Javed/Documents/JUNB_P0/Junb/Bars/Bar2_NREADS10_UMI4_HAMMING3_clondid.csv")
+clones <- read.csv("/Users/Javed/Documents/JUNB_P0/Junb/Bars/Bar2_NREADS10_UMI4_HAMMING3_clondid.csv", row.names = 1)
+clones$cellbc <- paste(clones$cellbc, "-1", sep = "")
+clones$cloneID <- paste(clones$cloneID, "0022", sep = "")
+head(clones$cellbc)
+merge.transcr.ling.may.pB2 <- function(pbmc, clones,new.col="cloneID", ... ){
+  cells <- intersect(clones$cellbc,colnames(pbmc))
+  rownames(clones) <- clones$cellbc
+  pbmc@meta.data[,new.col] <- "No LBC"
+  pbmc@meta.data[cells,new.col] <- clones[cells, new.col]
+  Idents(object = pbmc) <- new.col
+  pbmc@meta.data[WhichCells(pbmc,idents = "No LBC"),new.col] <- NA
+  return(pbmc)
+}
+pbmc <-  merge.transcr.ling.may.pB2(pbmc,clones, new.col = "cloneID")
+head(pbmc@meta.data)
+pbmc$cloneID
+Junb <- pbmc
+saveRDS(Junb, "/Users/javed/Documents/JUNB_P0/Junb/Junb_post_cloneID.rds")
+
+
+
+
+
+
+############ Merging #################
+
+Con <- readRDS("/Users/javed/Documents/JUNB_P0/Control/Control_post_cloneID.rds")
+Junb <- readRDS("/Users/javed/Documents/JUNB_P0/Junb/Junb_post_cloneID.rds")
+
+pbmc <- merge(Con, y=Junb)
+pbmc[["RNA"]] <- as(object = pbmc[["RNA"]], Class = "Assay")# convert a v5 assay to a v3 assay
+library(gprofiler2)
+mmus_s = gorth(cc.genes.updated.2019$s.genes, source_organism = "hsapiens", target_organism = "mmusculus")$ortholog_name
+mmus_g2m = gorth(cc.genes.updated.2019$g2m.genes, source_organism = "hsapiens", target_organism = "mmusculus")$ortholog_name
+pbmc <- CellCycleScoring(pbmc, s.features = mmus_s, g2m.features = mmus_g2m, set.ident = TRUE)
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(pbmc), 10)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes, vars.to.regress = c("Phase","percent.mt","nCount_RNA"))
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+pbmc <- FindNeighbors(pbmc, dims = 1:20)
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+DimPlot(pbmc, reduction = "umap", group.by = "clusters", cols = c25)
+DimPlot(pbmc, reduction = "umap", group.by = "orig.ident", cols = c25)
+DimPlot(pbmc, reduction = "umap", group.by = c("Phase"))
+
+
+########## Load in Dibella ############
+# Read the count matrix along with feature (gene) and cell (barcode) names
+count_matrix <- ReadMtx(
+  mtx = "/Users/javed/Documents/JUNB_P0/Bibella_Raw/gene_sorted-matrix.mtx.gz",
+  features = "/Users/javed/Documents/JUNB_P0/Bibella_Raw/genes.tsv",
+  cells = "/Users/javed/Documents/JUNB_P0/Bibella_Raw/barcodes.tsv"
+)
+
+# Read the metadata file
+metadata <- read.table("/Users/javed/Documents/JUNB_P0/Bibella_Raw/metaData_scDevSC.txt", header = TRUE, sep = "\t", row.names = 1)
+
+# Ensure that the cell names in the count matrix match those in the metadata
+# If not, adjust the cell names accordingly
+if (!all(colnames(count_matrix) %in% rownames(metadata))) {
+  # Example adjustment: remove potential suffixes or prefixes from cell names
+  colnames(count_matrix) <- sub("-1$", "", colnames(count_matrix))
+}
+
+# Subset the metadata to include only the cells present in the count matrix
+metadata <- metadata[colnames(count_matrix), , drop = FALSE]
+
+# Create the Seurat object with the count matrix and metadata
+seurat_object <- CreateSeuratObject(counts = count_matrix, meta.data = metadata)
+
+# Optional: View the Seurat object summary
+print(seurat_object)
+table(seurat_object$biosample_id)
+######### Label transfer ##############
+ref <- seurat_object
+Idents(ref) <- "biosample_id"
+ref <- subset(ref, ident = c("P1","P1_S1"))
+# select two technologies for the query datasets
+DefaultAssay(ref) <- "RNA"
+ref <- NormalizeData(ref)
+ref <- FindVariableFeatures(ref)
+ref <- ScaleData(ref)
+ref <- RunPCA(ref)
+ref <- FindNeighbors(ref, dims = 1:30)
+ref <- RunUMAP(ref, dims = 1:30)
+DimPlot(ref, group.by = c("New_cellType"))
+saveRDS(ref, "/Users/javed/Documents/JUNB_P0/Bibella_Raw/P1_only_dibella.rds")
+ref <- readRDS("/Users/javed/Documents/JUNB_P0/Bibella_Raw/P1_only_dibella.rds")
+
+pancreas.anchors <- FindTransferAnchors(reference = ref, query = pbmc, dims = 1:30,
+                                        reference.reduction = "pca")
+predictions <- TransferData(anchorset = pancreas.anchors, refdata = ref$New_cellType, dims = 1:30)
+pbmc <- AddMetaData(pbmc, metadata = predictions)
+
+table(pbmc$predicted.id)
+Idents(pbmc) <- "predicted.id"
+
+ref <- RunUMAP(ref, dims = 1:30, reduction = "pca", return.model = TRUE)
+pbmc <- MapQuery(anchorset = pancreas.anchors, reference = ref, query = pbmc,
+                 refdata = list(celltype = "New_cellType"), reference.reduction = "pca", reduction.model = "umap")
+p1 <- DimPlot(ref, reduction = "umap", group.by = "New_cellType", label = TRUE, label.size = 3,
+              repel = TRUE) + NoLegend() + ggtitle("Reference annotations")
+p2 <- DimPlot(pbmc, reduction = "ref.umap", group.by = "predicted.id", label = TRUE,
+              label.size = 3, repel = TRUE, cols = c25) + NoLegend() + ggtitle("Query transferred labels")
+p3 <- DimPlot(pbmc, reduction = "ref.umap", group.by = "clusters", label = TRUE,
+              label.size = 3, repel = TRUE) + NoLegend() + ggtitle("Query transferred labels")
+
+print(p1+p2+p3)
+
+VlnPlot(pbmc, features = "Eomes", split.by = "orig.ident")
+
+all <- pbmc
+Idents(pbmc) <- "predicted.id"
+pbmc <- subset(pbmc, ident = c("Endothelial cells","Low quality cells","Microglia","Pericytes","Ependymocytes"), invert = T)
+
+
+######### Cleaned up Dimplots ############
+c25 <- c(
+  "dodgerblue2", "darkred", # red
+  "green4",
+  "blue",
+  "red", "pink", # lt pink
+  "skyblue"
+)
+DimPlot(pbmc, cols = c25,  order = T)
+
+
+c2 <- c(
+  "black", "gray"
+)
+
+
+DimPlot(pbmc, cols = c2, group.by = "orig.ident", order = T)+NoLegend()
+
+pbmc$celltype <- pbmc@active.ident
+
+
+pbmc <- readRDS("/Users/javed/Documents/JUNB_P0/Final_merged.rds")
+
+
+##### Stacked
+metadata <- pbmc@meta.data
+
+# Create a data frame with counts
+count_df <- metadata %>%
+  group_by(orig.ident, celltype) %>%
+  dplyr::summarise(count = n()) %>%
+  ungroup()
+
+# Calculate the total counts per orig.ident to get proportions
+count_df <- count_df %>%
+  group_by(orig.ident) %>%
+  dplyr::mutate(proportion = count / sum(count)) %>%
+  ungroup()
+
+ggplot(count_df, aes(x = orig.ident, y = proportion, fill = celltype)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Proportions of predicted.id within each orig.ident",
+       x = "Original Identity (orig.ident)",
+       y = "Proportion") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+##### Barplot
+ggplot(count_df, aes(x = orig.ident, y = proportion, fill = orig.ident)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ celltype, scales = "free_y") +
+  labs(title = "Proportions per orig.ident for Each predicted.id",
+       x = "Original Identity (orig.ident)",
+       y = "Proportion",
+       fill = "Original Identity") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal(base_size = 14) 
+
+
+Idents(pbmc) <- "predicted.id"
+pbmc <- RenameIdents(
+  object = pbmc,
+  c('Migrating neurons' = 'Excitatory neurons','UL CPN' = 'Excitatory neurons'
+  ))
+
+pbmc$dibella_clusters <- pbmc@active.ident
+
+metadata <- pbmc@meta.data
+
+
+count_df <- metadata %>%
+  group_by(orig.ident, dibella_clusters) %>%
+  dplyr::summarise(count = n()) %>%
+  ungroup()
+
+# Calculate the total counts per orig.ident to get proportions
+count_df <- count_df %>%
+  group_by(orig.ident) %>%
+  dplyr::mutate(proportion = count / sum(count)) %>%
+  ungroup()
+ggplot(count_df, aes(x = orig.ident, y = proportion, fill = orig.ident)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ dibella_clusters, scales = "free_y") +
+  labs(title = "Proportions per orig.ident for Each predicted.id",
+       x = "Original Identity (orig.ident)",
+       y = "Proportion",
+       fill = "Original Identity") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+############ Clonal analysis ###############
+plot.seur.obj.color.all.clones <- function(seurat.obj){
+  color = grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)]
+  col=sample(color, length(table(seurat.obj@meta.data$cloneID)), replace = T) # Why table()?
+  print(DimPlot(seurat.obj, reduction = "umap",order = T, pt.size = 0.5, group.by = "cloneID",
+                label = F, label.size = 15) + scale_colour_manual(values = col, na.value = "grey98")+
+          NoLegend())
+}
+plot.seur.obj.color.all.clones(pbmc)
+
+
+
+
+
+
+
+compute.tibble.clones.cells.per.cluster = function(seurat.obj, only.cells.w.cloneID=FALSE){
+  if(only.cells.w.cloneID){
+    # Tibble with number of different clones and cells (which had a cloneID) per cluster, ordered by the first
+    seurat.obj@meta.data %>% dplyr::filter(!is.na(cloneID)) %>% group_by(predicted.id) %>% dplyr::summarize(num.diff.clones=length(unique(cloneID)), num.cells=n())%>%arrange(desc(num.diff.clones))
+  }
+  else{
+    # Tibble with number of different clones and cells per cluster, ordered by the first
+    seurat.obj@meta.data %>% group_by(predicted.id) %>% dplyr::summarize(num.diff.clones=n_distinct(cloneID, na.rm=TRUE), num.cells=n())%>%arrange(desc(num.diff.clones))
+  }
+}
+compute.tibble.clones.cells.per.cluster(pbmc)
+
+
+
+
+meta <- pbmc@meta.data
+n_occur <- data.frame(table(pbmc$cloneID))
+pbmc_c <- n_occur[n_occur$Freq > 0,]
+table(table(pbmc_c))
+
+sum(pbmc_c$Freq == "1") 
+sum(pbmc_c$Freq == "2") 
+sum(pbmc_c$Freq == "3") 
+sum(pbmc_c$Freq == "4") 
+sum(pbmc_c$Freq == "5") 
+sum(pbmc_c$Freq == "6") 
+sum(pbmc_c$Freq == "7") 
+sum(pbmc_c$Freq == "8") 
+sum(pbmc_c$Freq == "9") 
+sum(pbmc_c$Freq == "10") 
+sum(pbmc_c$Freq == "11") 
+sum(pbmc_c$Freq == "12") 
+sum(pbmc_c$Freq == "13") 
+sum(pbmc_c$Freq == "14") 
+sum(pbmc_c$Freq == "15") 
+sum(pbmc_c$Freq == "16") 
+
+
+
+
+source("/Users/javed/Documents/Timecourse/Scripts/clonal_analysis_common_functions.R")
+Idents(pbmc) <- "stages"
+# Generating clone csv for >1 cell clones
+dataset.name <- "clonal_dataset"
+# Seurat object to analyze
+seur.objs.proj.ca <- c(pbmc)
+# Clones of size less than min.clonesizes will be filtered out
+min.clonesizes <- c(2)
+# Lineage barcode calling method, which will determine
+# the column from where cloneIDs will be retrieved
+lb.calling.methods <- c("cloneID")
+# If specified, in conjunction with the next parameter,
+# defines whether and what filter to apply on cells
+# depending on the stage at which they were sampled
+# If a stage was specified, indicates whether to
+# keep only cells sampled at that stage, or exclude only these
+stage.keep.bools <- c(FALSE)
+stages = c("Control_E15_P0", "Junb_E15_P0")
+# Clusterization of the cells
+clusters.columns <- c("predicted.id")
+# Output folder path
+parent.folder.paths <- c("/Users/Javed/Documents/JUNB_P0/Clonal_analysis/")
+# Name of dataset. Used for output directory/file names
+dataset.names <- c(dataset.name)
+# Whether to actually output the results into a file
+write.csv.bools <- c(TRUE)
+# If any of the cells has any column with this value, it will be
+val.subset.exclude <- c("Remove")
+prepare.input.files.for.lineage.coupling.analysis <- function(
+    seur.objs.proj.ca, min.clonesizes=c(2)
+    , lb.calling.methods=c("Ryan_toptier_9")
+    , stages=c("", "e10", "e12", "e13", "e14")
+    , stage.keep.bools=c(TRUE)
+    , clusters.columns=c("refined_clust", "refined_class")
+    , use.default.names.array=c(TRUE)
+    , parent.folder.paths=c("./results/")
+    , provided.file.names=c("")
+    , dataset.names=c("clonal_dataset")
+    , write.csv.bools=c(TRUE)
+    , cols.subset=clusters.columns
+    , val.subset.exclude=c("Remove")){
+  # I didn't find a better way of iterating through the cartesian product
+  # of all the possible parameter values than this way
+  for(seur.obj.proj.ca in seur.objs.proj.ca){
+    # Create data frame with every combination of possible parameters
+    if(identical(cols.subset, clusters.columns) && identical(use.default.names.array, c(TRUE))){
+      dat <- expand.grid(min.clonesize=min.clonesizes
+                         , lb.calling.method=lb.calling.methods
+                         , stage=stages, stage.keep.bool=stage.keep.bools
+                         , clusters.column=clusters.columns
+                         , use.default.names=use.default.names.array
+                         , parent.folder.path=parent.folder.paths
+                         , dataset.names=dataset.names
+                         , write.csv.bool=write.csv.bools
+                         , val.subset.exclude=val.subset.exclude
+                         , stringsAsFactors=FALSE)
+      provided.file.names <- ""
+      col.subsets <- dat[[5]]
+      vals.subset.exclude <- dat[[10]]
+    }
+    else if(!identical(cols.subset, clusters.columns) && identical(use.default.names.array, c(TRUE))){
+      dat <- expand.grid(min.clonesize=min.clonesizes
+                         , lb.calling.method=lb.calling.methods
+                         , stage=stages, stage.keep.bool=stage.keep.bools
+                         , clusters.column=clusters.columns
+                         , use.default.names=use.default.names.array
+                         , parent.folder.path=parent.folder.paths
+                         , dataset.names=dataset.names
+                         , write.csv.bool=write.csv.bools
+                         , cols.subset=cols.subset
+                         , val.subset.exclude=val.subset.exclude
+                         , stringsAsFactors=FALSE)
+      provided.file.names <- ""
+      col.subsets <- dat[[10]]
+      vals.subset.exclude <- dat[[11]]
+    }
+    else if(identical(cols.subset, clusters.columns) && identical(use.default.names.array, c(FALSE))){
+      dat <- expand.grid(min.clonesize=min.clonesizes
+                         , lb.calling.method=lb.calling.methods
+                         , stage=stages, stage.keep.bool=stage.keep.bools
+                         , clusters.column=clusters.columns
+                         , use.default.names=use.default.names.array
+                         , parent.folder.path=parent.folder.paths
+                         , dataset.names=dataset.names
+                         , write.csv.bool=write.csv.bools
+                         , val.subset.exclude=val.subset.exclude
+                         , stringsAsFactors=FALSE)
+      col.subsets <- dat[[5]]
+      vals.subset.exclude <- dat[[10]]
+    }
+    else if(!identical(cols.subset, clusters.columns) && identical(use.default.names.array, c(FALSE))){
+      dat <- expand.grid(min.clonesize=min.clonesizes
+                         , lb.calling.method=lb.calling.methods
+                         , stage=stages, stage.keep.bool=stage.keep.bools
+                         , clusters.column=clusters.columns
+                         , use.default.names=use.default.names.array
+                         , parent.folder.path=parent.folder.paths
+                         , dataset.names=dataset.names
+                         , write.csv.bool=write.csv.bools
+                         , val.subset.exclude=val.subset.exclude
+                         , stringsAsFactors=FALSE)
+      col.subsets <- dat[[10]]
+      vals.subset.exclude <- dat[[11]]
+    }
+    min.clonesize <- dat[[1]]
+    lb.calling.methods <- dat[[2]]
+    stages <- dat[[3]]
+    stage.keep.bools <- dat[[4]]
+    clusters.columns <- dat[[5]]
+    use.default.names.array <- dat[[6]]
+    parent.folder.paths <- dat[[7]]
+    dataset.names <- dat[[8]]
+    write.csv.bools <- dat[[9]]
+    
+    # Apply function by row
+    function_map <- mapply(prepare.input.file.for.lineage.coupling.analysis
+                           , as.array(rep(list(seur.obj.proj.ca), nrow(dat)))
+                           , min.clonesize, lb.calling.methods, stages
+                           , stage.keep.bools, clusters.columns, use.default.names.array
+                           , parent.folder.paths, provided.file.names, dataset.names
+                           , write.csv.bools, col.subsets, vals.subset.exclude
+    )
+    
+  }
+}
+
+
+prepare.input.files.for.lineage.coupling.analysis(seur.objs.proj.ca=seur.objs.proj.ca
+                                                  , min.clonesizes=min.clonesizes
+                                                  , lb.calling.methods=lb.calling.methods
+                                                  , stages=stages, stage.keep.bools=stage.keep.bools
+                                                  , clusters.columns=clusters.columns
+                                                  , parent.folder.paths=parent.folder.paths
+                                                  , dataset.names=dataset.names
+                                                  , write.csv.bools=write.csv.bools
+                                                  , val.subset.exclude=val.subset.exclude)
+
+
+
+
+library(dplyr)
+clone_summary <- pbmc@meta.data %>%
+  dplyr::group_by(cloneID, stage) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop') %>%
+  filter(cloneSize <= 30)  # Exclude clones with size above 100
+ggplot(clone_summary, aes(x = stage, y = cloneSize)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "Distribution of Clone Sizes by Stage (Excluding Clones > 100)",
+       x = "Stage",
+       y = "Clone Size")
+
+
+ggplot(clone_summary, aes(x = stage, y = cloneSize)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "Distribution of Clone Sizes by Stage",
+       x = "Stage",
+       y = "Clone Size")
+
+
+ggplot(clone_summary, aes(x = stage, y = cloneSize)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.1, outlier.shape = NA) +
+  theme_bw() +
+  labs(title = "Distribution of Clone Sizes by Stage (Violin Plot)",
+       x = "Stage",
+       y = "Clone Size")
+
+
+
+
+####### Balanced dataset
+
+pbmc$stage <- pbmc$orig.ident
+# Determine the minimum number of cells among stages
+cell_counts <- pbmc@meta.data %>%
+  dplyr::group_by(stage) %>%
+  dplyr::summarise(n = n())
+
+min_cells <- min(cell_counts$n)  # smallest cell count across all stages
+
+# Randomly sample cells from each stage to equalize the number of cells
+balanced_data <- pbmc@meta.data %>%
+  dplyr::group_by(stage) %>%
+  sample_n(min_cells, replace = FALSE) %>%
+  ungroup()
+
+clone_summary <- balanced_data %>%
+  dplyr::group_by(cloneID, stage) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop') %>%
+  filter(cloneSize <= 30 & cloneSize >= 1)  # Exclude clones with size above 100
+
+
+ggplot(clone_summary, aes(x = stage, y = cloneSize)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "Distribution of Clone Sizes by Stage with Equalized Cell Counts",
+       x = "Stage",
+       y = "Clone Size")
+
+
+
+# Extract clone sizes for each stage
+stage1_clone_sizes <- clone_summary %>% 
+  filter(stage == "Control_E15_P0") %>% 
+  pull(cloneSize)
+
+stage2_clone_sizes <- clone_summary %>% 
+  filter(stage == "Junb_E15_P0") %>% 
+  pull(cloneSize)
+
+# Perform the Wilcoxon rank-sum test
+test_result <- wilcox.test(stage1_clone_sizes, stage2_clone_sizes)
+
+test_result
+
+
+ggplot(clone_summary, aes(x = stage, y = cloneSize)) +
+  geom_violin(trim = FALSE, fill = "lightblue") +
+  geom_boxplot(width = 0.1, outlier.shape = NA) +
+  theme_bw() +
+  labs(title = "Clone Size Distribution by Stage with Equalized Cell Counts",
+       x = "Stage",
+       y = "Clone Size") +
+  stat_summary(fun=median, geom="point", size=2, color="red")
+
+
+
+
+#Celltype
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+
+# Determine the minimum number of cells among stages
+cell_counts <- pbmc@meta.data %>%
+  dplyr::group_by(stage) %>%
+  dplyr::summarise(n = n())
+
+min_cells <- min(cell_counts$n)  # The smallest cell count across stages
+
+# Randomly sample cells from each stage to match the smallest stage's cell count
+set.seed(123)  # For reproducibility
+balanced_data <- pbmc@meta.data %>%
+  dplyr::group_by(stage) %>%
+  sample_n(min_cells, replace = FALSE) %>%
+  ungroup()
+
+# Calculate clone sizes and exclude large clones
+clone_summary <- balanced_data %>%
+  dplyr::group_by(cloneID, stage, predicted.id) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop') %>%
+  filter(cloneSize <= 20)  # Exclude clones with size above 100
+
+# Get the list of unique predicted.ids
+predicted_ids <- unique(clone_summary$predicted.id)
+
+# Perform Wilcoxon tests for each predicted.id
+wilcox_results <- clone_summary %>%
+  dplyr::group_by(predicted.id) %>%
+  nest() %>%
+  dplyr::mutate(
+    test = map(data, ~{
+      stage1_clone_sizes <- .x %>%
+        dplyr::filter(stage == "Control_E15_P0") %>%
+        dplyr::pull(cloneSize)
+      
+      stage2_clone_sizes <- .x %>%
+        dplyr::filter(stage == "Junb_E15_P0") %>%
+        dplyr::pull(cloneSize)
+      
+      # Ensure there are enough data points for the test
+      if(length(stage1_clone_sizes) > 0 & length(stage2_clone_sizes) > 0){
+        wilcox.test(stage1_clone_sizes, stage2_clone_sizes)
+      } else {
+        NA
+      }
+    }),
+    p_value = map_dbl(test, ~ ifelse(is.list(.x), .x$p.value, NA)),
+    statistic = map_dbl(test, ~ ifelse(is.list(.x), .x$statistic, NA))
+  ) %>%
+  select(predicted.id, statistic, p_value)
+
+# Adjust p-values for multiple testing (e.g., Benjamini-Hochberg)
+wilcox_results <- wilcox_results %>%
+  mutate(adj_p_value = p.adjust(p_value, method = "BH"))
+
+# View significant results
+significant_results <- wilcox_results %>%
+  filter(adj_p_value < 0.05)  # Adjust the threshold as needed
+
+print(significant_results)
+
+# Plot clone size distributions faceted by predicted.id
+ggplot(clone_summary, aes(x = stage, y = cloneSize, fill = stage)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8) +
+  stat_summary(fun = median, geom = "point", size = 2, color = "red") +
+  facet_wrap(~ predicted.id, scales = "free_y") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    title = "Clone Size Distribution by Stage and Predicted ID",
+    x = "Stage",
+    y = "Clone Size"
+  )
+
+
+
+
+
+######## Removing interneuron clones ##########
+library(dplyr)
+library(ggplot2)
+
+# Assuming 'balanced_data' is already defined from your previous steps
+
+# Step 1: Identify clones that have at least one 'interneuron' predicted.id
+clones_with_interneuron <- balanced_data %>%
+  dplyr::group_by(cloneID) %>%
+  dplyr::summarize(has_interneuron = any(predicted.id == "Interneurons"), .groups = 'drop')
+
+# View the first few entries
+head(clones_with_interneuron)
+
+# Step 2: Calculate the number and percentage of clones with interneurons
+num_clones_with_interneuron <- clones_with_interneuron %>%
+  dplyr::filter(has_interneuron) %>%
+  nrow()
+
+total_clones <- clones_with_interneuron %>%
+  nrow()
+
+percent_clones_with_interneuron <- (num_clones_with_interneuron / total_clones) * 100
+
+# Display the results
+cat("Number of clones with at least one interneuron cell:", num_clones_with_interneuron, "\n")
+cat("Total number of clones:", total_clones, "\n")
+cat("Percentage of clones with interneurons:", round(percent_clones_with_interneuron, 2), "%\n")
+
+
+# Step 3A: Create a summary for plotting
+clone_interneuron_summary <- clones_with_interneuron %>%
+  mutate(interneuron_status = ifelse(has_interneuron, "Has Interneuron", "No Interneuron"))
+
+# Plotting the bar chart
+ggplot(clone_interneuron_summary, aes(x = interneuron_status)) +
+  geom_bar(fill = c("steelblue", "orange")) +
+  theme_minimal() +
+  labs(
+    title = "Number of Clones with and without Interneurons",
+    x = "Interneuron Presence",
+    y = "Number of Clones"
+  )
+
+
+
+# Step 3B: Prepare data for pie chart
+clone_interneuron_pie <- clones_with_interneuron %>%
+  dplyr::mutate(interneuron_status = ifelse(has_interneuron, "Has Interneuron", "No Interneuron")) %>%
+  dplyr::group_by(interneuron_status) %>%
+  dplyr::summarise(count = n(), .groups = 'drop') %>%
+  dplyr::mutate(percentage = count / sum(count) * 100,
+         label = paste0(interneuron_status, " (", round(percentage, 1), "%)"))
+
+# Plotting the pie chart
+ggplot(clone_interneuron_pie, aes(x = "", y = count, fill = interneuron_status)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  theme_void() +
+  labs(title = "Proportion of Clones with Interneurons") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5)) +
+  scale_fill_manual(values = c("Has Interneuron" = "steelblue", "No Interneuron" = "orange"))
+
+
+
+
+# Step 4A: Merge clone information with stage
+clones_with_stage <- balanced_data %>%
+  dplyr::select(cloneID, stage) %>%
+  distinct()
+
+clones_interneuron_stage <- clones_with_interneuron %>%
+  left_join(clones_with_stage, by = "cloneID")
+
+# Summarize by stage
+clone_interneuron_summary_stage <- clones_interneuron_stage %>%
+  dplyr::group_by(stage) %>%
+  dplyr::summarize(
+    total_clones = n(),
+    clones_with_interneuron = sum(has_interneuron),
+    percent_with_interneuron = (clones_with_interneuron / total_clones) * 100,
+    .groups = 'drop'
+  )
+
+# View the summary
+print(clone_interneuron_summary_stage)
+
+
+
+
+
+############### Clonal analysis final - tidy #############
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+
+# Assuming 'pbmc' is your Seurat object
+meta <- pbmc@meta.data
+
+# Step 1: Identify clones that contain at least one 'Interneurons' predicted.id
+# Note: Ensure that the 'predicted.id' value matches exactly (case-sensitive)
+clones_with_interneuron <- meta %>%
+  dplyr::group_by(cloneID) %>%
+  dplyr::summarize(has_interneuron = any(predicted.id == "Interneurons"), .groups = 'drop')
+
+# View a summary of clones with interneurons
+table(clones_with_interneuron$has_interneuron)
+
+# Step 2: Extract cloneIDs to exclude
+cloneIDs_to_exclude <- clones_with_interneuron %>%
+  dplyr::filter(has_interneuron) %>%
+  pull(cloneID)
+
+# Display the number of clones to exclude
+cat("Number of clones containing interneurons:", length(cloneIDs_to_exclude), "\n")
+
+
+
+
+# Step 3: Exclude cells from clones with interneurons
+filtered_meta <- meta %>%
+  dplyr::filter(!(cloneID %in% cloneIDs_to_exclude))
+
+# Verify the exclusion
+remaining_clones <- filtered_meta %>%
+  dplyr::pull(cloneID) %>%
+  unique()
+
+cat("Total clones after exclusion:", length(remaining_clones), "\n")
+
+# Step 4: Determine the minimum number of cells among stages
+cell_counts <- filtered_meta %>%
+  dplyr::group_by(stage) %>%
+  dplyr::summarise(n = n(), .groups = 'drop')
+
+min_cells <- min(cell_counts$n)  # The smallest cell count across stages
+cat("Minimum number of cells across stages:", min_cells, "\n")
+
+# Step 5: Randomly sample cells from each stage to match the smallest stage's cell count
+set.seed(123)  # For reproducibility
+balanced_data <- filtered_meta %>%
+  dplyr::group_by(stage) %>%
+  sample_n(min_cells, replace = FALSE) %>%
+  ungroup()
+
+# Verify balanced data
+balanced_cell_counts <- balanced_data %>%
+  dplyr::group_by(stage) %>%
+  dplyr::summarise(n = n(), .groups = 'drop')
+
+print(balanced_cell_counts)
+
+
+# To exclude cells with NA cloneID
+filtered_meta <- meta %>%
+  filter(!is.na(cloneID) & !(cloneID %in% cloneIDs_to_exclude))
+
+
+# Step 6: Calculate clone sizes and apply size filters
+clone_summary <- balanced_data %>%
+  dplyr::group_by(cloneID, stage, predicted.id) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop') 
+#%>% dplyr::filter(cloneSize <= 30 & cloneSize >=2)  # Adjust thresholds as needed
+
+# Verify clone summary
+print(clone_summary)
+
+# Step 7: Perform Wilcoxon rank-sum tests for each predicted.id
+# Get the list of unique predicted.ids
+predicted_ids <- unique(clone_summary$predicted.id)
+
+# Perform Wilcoxon tests for each predicted.id
+wilcox_results <- clone_summary %>%
+  dplyr::group_by(predicted.id) %>%
+  nest() %>%
+  dplyr::mutate(
+    test = map(data, ~{
+      stage1_clone_sizes <- .x %>%
+        dplyr::filter(stage == "Control_E15_P0") %>%
+        dplyr::pull(cloneSize)
+      
+      stage2_clone_sizes <- .x %>%
+        dplyr::filter(stage == "Junb_E15_P0") %>%
+        dplyr::pull(cloneSize)
+      
+      # Perform Wilcoxon test with exact = FALSE to use the normal approximation
+      if(length(stage1_clone_sizes) > 0 & length(stage2_clone_sizes) > 0){
+        wilcox.test(stage1_clone_sizes, stage2_clone_sizes, exact = FALSE)
+      } else {
+        NA
+      }
+    }),
+    p_value = map_dbl(test, ~ ifelse(is.list(.x), .x$p.value, NA)),
+    statistic = map_dbl(test, ~ ifelse(is.list(.x), .x$statistic, NA))
+  ) %>%
+  select(predicted.id, statistic, p_value) %>%
+  mutate(adj_p_value = p.adjust(p_value, method = "BH"))
+# View significant results
+significant_results <- wilcox_results %>%
+  filter(adj_p_value < 0.05)
+
+print(significant_results)
+
+# Step 8: Visualize clone size distributions faceted by predicted.id
+ggplot(clone_summary, aes(x = stage, y = cloneSize, fill = stage)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.8) +
+  stat_summary(fun = median, geom = "point", size = 2, color = "red") +
+  facet_wrap(~ predicted.id) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(
+    title = "Clone Size Distribution by Stage and Predicted ID (Excluding Interneuron Clones)",
+    x = "Stage",
+    y = "Clone Size"
+  )
+
+
+# Plotting Individual Clones Across Stages
+ggplot(clone_summary, aes(x = stage, y = cloneSize, color = stage)) +
+  geom_jitter(width = 0.2, alpha = 0.6, size = 1.5) +  # Jitter to reduce overplotting
+  theme_bw() +
+  labs(
+    title = "Individual Clone Sizes Across Stages",
+    x = "Stage",
+    y = "Clone Size"
+  ) +
+  theme(legend.position = "none")
+
+
+
+ggplot(clone_summary, aes(x = stage, y = cloneSize, color = stage)) +
+  geom_jitter(width = 0.2, alpha = 0.6, size = 1.5) +
+  facet_wrap(~ predicted.id, scales = "free_y") +  # Facet by cell type
+  theme_bw() +
+  labs(
+    title = "Individual Clone Sizes Across Stages by Predicted ID",
+    x = "Stage",
+    y = "Clone Size"
+  ) +
+  theme(legend.position = "none")
+
+
+ggplot(clone_summary, aes(x = cloneSize, fill = stage)) +
+  geom_histogram(binwidth = 1, position = "dodge", alpha = 0.7) +
+  facet_wrap(~ predicted.id, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Histogram of Clone Sizes by Predicted ID and Stage",
+    x = "Clone Size",
+    y = "Frequency"
+  ) +
+  scale_fill_manual(values = c("Control_E15_P0" = "skyblue", "Junb_E15_P0" = "salmon")) +
+  theme(legend.position = "bottom")
+
+
+
+
+# Density Plot of Clone Sizes Across All Stages
+ggplot(clone_summary, aes(x = cloneSize, color = stage, fill = stage)) +
+  geom_density(alpha = 0.3) +
+  theme_bw() +
+  labs(
+    title = "Density Plot of Clone Sizes Across Stages",
+    x = "Clone Size",
+    y = "Density"
+  ) +
+  scale_fill_manual(values = c("Control_E15_P0" = "skyblue", "Junb_E15_P0" = "salmon")) +
+  scale_color_manual(values = c("Control_E15_P0" = "blue", "Junb_E15_P0" = "red"))
+
+
+
+
+ggplot(clone_summary, aes(x = cloneSize, color = stage, fill = stage)) +
+  geom_density(alpha = 0.3) +
+  facet_wrap(~ predicted.id, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Density Plot of Clone Sizes by Predicted ID and Stage",
+    x = "Clone Size",
+    y = "Density"
+  ) +
+  scale_fill_manual(values = c("Control_E15_P0" = "skyblue", "Junb_E15_P0" = "salmon")) +
+  scale_color_manual(values = c("Control_E15_P0" = "blue", "Junb_E15_P0" = "red")) +
+  theme(legend.position = "bottom")
+
+
+
+VlnPlot(pbmc, features = c("Neurog2","Eomes"), split.by = "orig.ident")
+FeaturePlot(pbmc, features = c("Neurog2","Eomes"), split.by = "orig.ident")
+
+
+
+saveRDS(pbmc, "/Users/javed/Documents/JUNB_P0/Final_merged.rds")
+
+
+
+############ UPSET PLOT ##############
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ComplexUpset)
+
+
+# Assuming 'clone_summary' is your filtered and balanced data frame
+# clone_summary contains: cloneID, stage, predicted.id, cloneSize
+
+# Step 1: Create a binary matrix indicating presence of each predicted.id in each clone
+clone_predicted_matrix <- clone_summary %>%
+  select(cloneID, predicted.id, stage) %>%
+  distinct() %>%  # Ensure each clone-predicted.id pair is unique
+  mutate(present = 1) %>%
+  pivot_wider(names_from = predicted.id, values_from = present, values_fill = list(present = 0))
+
+# View the first few rows of the binary matrix
+head(clone_predicted_matrix)
+
+
+
+# Basic UpSet plot
+upset(
+  clone_predicted_matrix,
+  intersect = colnames(clone_predicted_matrix)[-1],  # Exclude cloneID
+  name = "Predicted IDs",
+  width_ratio = 0.1,
+  min_size = 1
+) +
+  ggtitle("UpSet Plot of Clone Sharing Among Predicted IDs")
+
+
+
+
+
+
+
+
+######## REDONE SUBSETTING ########
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+library(tibble)  # For rownames_to_column
+
+# 1. Filter out interneuron clones
+clones_with_interneuron <- pbmc@meta.data %>%
+  group_by(cloneID) %>%
+  summarize(has_interneuron = any(predicted.id == "Interneurons"), .groups = 'drop')
+
+cloneIDs_to_exclude <- clones_with_interneuron %>%
+  filter(has_interneuron) %>%
+  pull(cloneID)
+
+filtered_meta <- pbmc@meta.data %>%
+  rownames_to_column(var = "cell") %>%  # Preserve cell names
+  filter(!is.na(cloneID) & !(cloneID %in% cloneIDs_to_exclude))
+
+# 2. Balance the dataset
+cell_counts <- filtered_meta %>%
+  group_by(orig.ident) %>%
+  summarise(n = n(), .groups = 'drop')
+
+print(cell_counts)
+
+min_cells <- min(cell_counts$n)
+cat("Minimum number of cells across datasets:", min_cells, "\n")
+
+set.seed(123)
+
+balanced_meta <- filtered_meta %>%
+  group_by(orig.ident) %>%
+  sample_n(min_cells, replace = FALSE) %>%
+  ungroup()
+
+balanced_counts <- balanced_meta %>%
+  group_by(orig.ident) %>%
+  summarise(n = n(), .groups = 'drop')
+
+print(balanced_counts)
+
+# 3. Extract cell names for subsetting
+final_cells <- balanced_meta$cell
+
+# Verify cell names
+head(final_cells)
+
+# 4. Subset the Seurat object
+pbmc_filtered <- subset(pbmc, cells = final_cells)
+
+# 5. Preprocess the data
+pbmc_filtered <- NormalizeData(pbmc_filtered)
+pbmc_filtered <- FindVariableFeatures(pbmc_filtered, selection.method = "vst", nfeatures = 2000)
+pbmc_filtered <- ScaleData(pbmc_filtered, features = VariableFeatures(pbmc_filtered))
+pbmc_filtered <- RunPCA(pbmc_filtered, features = VariableFeatures(pbmc_filtered))
+pbmc_filtered <- RunUMAP(pbmc_filtered, dims = 1:10)
+
+
+# Option 1: Separate UMAP plots using DimPlot
+DimPlot(pbmc_filtered, reduction = "umap", group.by = "predicted.id", order = T)
+
+DimPlot(pbmc_filtered, reduction = "umap", group.by = "orig.ident", order = T) 
+
+
+
+# Assuming 'pbmc_filtered' is the final Seurat object after filtering and balancing
+meta <- pbmc_filtered@meta.data
+
+# Step 1: Calculate clone sizes for each stage and predicted.id
+clone_summary <- meta %>%
+  dplyr::group_by(cloneID, stage, predicted.id) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop')
+
+# Verify clone summary
+print(clone_summary)
+
+
+# Step 2: Plot the clone size distribution by stage and predicted.id
+ggplot(clone_summary, aes(x = cloneSize, fill = stage)) +
+  geom_histogram(binwidth = 1, position = "dodge", alpha = 0.7) +
+  facet_wrap(~ predicted.id, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Histogram of Clone Sizes by Predicted ID and Stage",
+    x = "Clone Size",
+    y = "Frequency"
+  ) +
+  scale_fill_manual(values = c("Control_E15_P0" = "skyblue", "Junb_E15_P0" = "salmon")) +
+  theme(legend.position = "bottom")
+
+
+
+saveRDS(pbmc_filtered, "/Users/javed/Documents/JUNB_P0/merged_balanced.rds")
+
+
+
+
+# Step 3: Wilcoxon test for differences in clone sizes by stage
+wilcox_results <- clone_summary %>%
+  dplyr::group_by(predicted.id) %>%
+  dplyr::summarize(
+    wilcox_test = list(wilcox.test(cloneSize ~ stage)),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    p_value = map_dbl(wilcox_test, ~ .x$p.value),
+    statistic = map_dbl(wilcox_test, ~ .x$statistic)
+  ) %>%
+  select(predicted.id, statistic, p_value)
+
+# View the Wilcoxon results
+print(wilcox_results)
+
+
+
+
+
+FeaturePlot(pbmc_filtered, features = "Aqp4", order = T,pt.size = 1)  & 
+  scale_colour_gradientn(colours = c("#EFEFEF","red","darkred"))
+
+DimPlot(pbmc_filtered, group.by = "celltype")
+all <- pbmc
+Idents(pbmc_filtered) <- "celltype"
+pbmc <- subset(pbmc_filtered, ident = "Migrating neurons")
+Idents(pbmc) <- "orig.ident"
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+top10 <- head(VariableFeatures(pbmc), 10)
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+
+
+differential.genes <- FindAllMarkers(pbmc,only.pos=TRUE, min.pct= 0.25,logfc.threshold=0.25,test.use='LR',latent.vars='nCount_RNA', slot = "scale.data")
+topgenes <- differential.genes %>% group_by(cluster) %>% top_n(n = 26, wt = avg_log2FC)
+topgenes_new <- topgenes[topgenes$gene != "RFPNLS", ]
+DoHeatmap(object = pbmc,features = c(topgenes_new$gene), size = 3, disp.max = 1.4, disp.min = -1.5, slot = "scale.data")+ scale_fill_gradient2( low = rev(c('#cbe2ee','#4b97c6','#0e447c')), mid = "white", high = rev(c('#a91529','#da6954','#fbd2bc')), midpoint = 0, guide = "colourbar", aesthetics = "fill")
+
+pbmc <- readRDS("/Users/javed/Documents/JUNB_P0/merged_balanced.rds")
+pbmc <- RunPCA(pbmc, features = VariableFeatures(pbmc))
+pbmc <- RunUMAP(pbmc, dims = 1:50, n.neighbors = 10,  umap.method = "umap-uwot")
+
+DimPlot(pbmc,shuffle = T)
+
+Idents(pbmc) <- "orig.ident"
+Con <- subset(pbmc, ident = "Control_E15_P0")
+Junb <- subset(pbmc, ident = "Junb_E15_P0")
+
+table(Con$celltype)
+table(Junb$celltype)
+
+ref <- readRDS("/Users/javed/Documents/JUNB_P0/Bibella_Raw/P1_only_dibella.rds")
+pancreas.anchors <- FindTransferAnchors(reference = ref, query = pbmc, dims = 1:20,  reference.reduction = "pca")
+ref <- RunUMAP(ref, dims = 1:20, reduction = "pca", return.model = TRUE)
+pbmc <- MapQuery(anchorset = pancreas.anchors, reference = ref, query = pbmc,refdata = list(celltype = "New_cellType"), reference.reduction = "pca", reduction.model = "umap")
+p1 <- DimPlot(ref, reduction = "umap", group.by = "New_cellType", label = TRUE, label.size = 3,
+ repel = TRUE) + NoLegend() + ggtitle("Reference annotations")
+p2 <- DimPlot(pbmc, reduction = "ref.umap", group.by = "predicted.id", label = TRUE,
+ label.size = 3, repel = TRUE, cols = c25) + NoLegend() + ggtitle("Query transferred labels")
+p3 <- DimPlot(pbmc, reduction = "ref.umap", group.by = "clusters", label = TRUE,
+label.size = 3, repel = TRUE) + NoLegend() + ggtitle("Query transferred labels")
+print(p1+p2+p3)
+
+pbmc <- RunUMAP(pbmc, dims = 1:10, reduction = "ref.pca", return.model = TRUE, n.neighbors = 20)
+
+
+cluster_color <- c(
+  "#5D3283",
+  "#D7BED6",
+  "#8D4584",
+  "#70808F",
+  "#E1C583",
+  "#86C7C1"
+)
+
+#MAKE NEW UMAPS
+DimPlot(pbmc,shuffle = T,reduction = "umap", group.by = "celltype", cols = cluster_color)
+DimPlot(pbmc,shuffle = T,reduction = "umap", group.by = "orig.ident", cols = c("#CCCCCC","#569FED"))
+
+FeaturePlot(pbmc, features = "Rbfox3", order = T,pt.size = 1)  & 
+  scale_colour_gradientn(colours = c("#E3EBF0","#77A6CB","#05508C"))
+
+
+saveRDS(pbmc, "/Users/javed/Documents/JUNB_P0/merged_balanced_bestumap.rds")
+
+pbmc <- readRDS("/Users/javed/Documents/JUNB_P0/merged_balanced_bestumap.rds")
+
+pbmc$dibella_clusters
+#Junb expression light grey to blue
+#cell cycle G1 in pink esther 
+
+#e7e1ef
+#c994c7
+#dd1c77
+
+# Load necessary libraries
+
+
+
+
+# Extract metadata from the Seurat object
+metadata <- pbmc@meta.data
+
+# Define the groups to compare
+target_groups <- c("Control_E15_P0", "Junb_E15_P0")
+
+# Filter metadata for the target groups
+data_subset <- metadata %>%
+  dplyr::filter(orig.ident %in% target_groups) %>%
+  dplyr::select(orig.ident, cloneID, predicted.id) %>%
+  dplyr::filter(!is.na(cloneID) & !is.na(predicted.id))
+
+# Check that both target groups are present
+if (!all(target_groups %in% unique(data_subset$orig.ident))) {
+  stop("One or more of the target groups are missing in the data.")
+}
+
+# Get a consistent order of predicted.id values
+predicted_id_order <- unique(data_subset$predicted.id)
+
+# Create a combined presence/absence matrix for intersections
+create_combined_presence_matrix <- function(data, ordered_ids) {
+  combined_matrix <- data %>%
+    dplyr::distinct(orig.ident, cloneID, predicted.id) %>%
+    dplyr::mutate(present = 1) %>%
+    tidyr::pivot_wider(
+      names_from = c(predicted.id, orig.ident),  # Combine predicted.id and orig.ident
+      values_from = present,
+      values_fill = list(present = 0)
+    ) %>%
+    as.data.frame()
+  
+  # Set rownames to cloneID
+  rownames(combined_matrix) <- combined_matrix$cloneID
+  combined_matrix$cloneID <- NULL
+  
+  # Reorder columns based on predicted.id order
+  ordered_columns <- unlist(lapply(ordered_ids, function(x) {
+    c(paste0(x, "_Control_E15_P0"), paste0(x, "_Junb_E15_P0"))
+  }))
+  
+  ordered_columns <- intersect(ordered_columns, colnames(combined_matrix))
+  combined_matrix <- combined_matrix[, ordered_columns]
+  
+  return(combined_matrix)
+}
+
+# Generate the combined presence/absence matrix
+presence_matrix_combined <- create_combined_presence_matrix(data_subset, predicted_id_order)
+
+# Define the file path for the PDF
+output_pdf <- "UpSet_Plot_Grouped_Intersections.pdf"
+
+# Open the PDF device
+pdf(output_pdf, width = 12, height = 10)
+
+# Generate the UpSet plot
+UpSetR::upset(
+  data = presence_matrix_combined,
+  sets = colnames(presence_matrix_combined),
+  keep.order = TRUE,
+  order.by = "freq",
+  main.bar.color = "steelblue",
+  sets.bar.color = "gray",
+  matrix.color = "black",
+  mainbar.y.label = "Intersection Size (Grouped by Predicted.id)",
+  sets.x.label = "Set Size",
+  text.scale = c(1.5, 1.5, 1, 1, 1.5, 1.5),
+  mb.ratio = c(0.6, 0.4),
+  empty.intersections = "on"
+)
+
+# Close the PDF device
+dev.off()
+
+# Notify the user
+cat("Grouped UpSet plot saved as:", output_pdf, "\n")
+
