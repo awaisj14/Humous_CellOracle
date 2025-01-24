@@ -1,0 +1,461 @@
+##############################################
+# FOR MOUSE
+##############################################
+library(Seurat)
+library(Signac)
+library(GenomeInfoDb)
+library(GenomicRanges)
+library(Matrix)
+# If not installed, you may also need:
+# install.packages("BiocManager")
+# BiocManager::install("EnsDb.Mmusculus.v79")
+library(EnsDb.Mmusculus.v79)
+
+##############################################
+# 1) Read in metadata
+##############################################
+#Download https://ftp.ncbi.nlm.nih.gov/geo/series/GSE241nnn/GSE241429/suppl/GSE241429%5Fmouse%5FscMultiome%5Fmeta%5Fdata.txt.txt.gz
+meta.data <- read.table(
+  file = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE241429_mouse_scMultiome_meta_data.txt.txt.gz",
+  header = TRUE,
+  row.names = 1,
+  sep = "\t"
+)
+
+##############################################
+# 2) Read in RNA counts matrix
+##############################################
+#Download https://ftp.ncbi.nlm.nih.gov/geo/series/GSE241nnn/GSE241429/suppl/GSE241429%5Fmouse%5FscMultiome%5Fgene%5Fcounts%5Fmatrix.txt.txt.gz
+gene.counts <- read.table(
+  file = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE241429_mouse_scMultiome_gene_counts_matrix.txt.txt.gz",
+  header = TRUE,
+  row.names = 1,
+  sep = "\t"
+)
+
+# If columns of gene.counts match rownames in meta.data:
+# Transpose if needed, depending on the format in your file.
+# For example, if your file has cells as rows and genes as columns, do:
+# gene.counts <- t(gene.counts)
+
+# Create Seurat object with the RNA assay
+seurat.obj <- CreateSeuratObject(
+  counts   = gene.counts,
+  meta.data = meta.data,
+  assay    = "RNA"
+)
+
+##############################################
+# 3) Read in peak (ATAC) data
+##############################################
+#Download this: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE241nnn/GSE241429/suppl/GSE241429%5Fmouse%5FscMultiome%5Fpeak%5Fmatrix.mtx.gz
+# (a) Read the peak matrix (in Matrix Market format)
+peak.mat <- readMM("/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE241429_mouse_scMultiome_peak_matrix.mtx.gz")
+
+#Download this: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE241nnn/GSE241429/suppl/GSE241429%5Fmouse%5FscMultiome%5Fpeak.bed.gz
+peak.bed <- read.table(
+  file = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE241429_mouse_scMultiome_peak.bed.gz",
+  header = FALSE,
+  sep = "\t"
+)
+colnames(peak.bed) <- c("chr", "start", "end")
+
+# Convert the peak coordinates to a GRanges object
+peak.ranges <- makeGRangesFromDataFrame(
+  df                 = peak.bed,
+  seqnames.field     = "chr",
+  start.field        = "start",
+  end.field          = "end",
+  keep.extra.columns = FALSE
+)
+
+# IMPORTANT: Ensure the columns of peak.mat match exactly the same cells (barcodes)
+# in the same order as in seurat.obj. If you have a separate barcodes file, or the
+# metadata can provide cell names, reorder them accordingly. For example:
+colnames(peak.mat) <- rownames(meta.data)
+
+##############################################
+# 4) Optional: Prepare a gene annotation for coverage plotting
+##############################################
+# You can obtain a mouse annotation from EnsDb
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79)
+seqlevelsStyle(annotation) <- "UCSC"  # for consistency with UCSC naming
+annotation$genebiotype <- annotation$gene_biotype
+
+##############################################
+# 5) Create a Signac ChromatinAssay
+##############################################
+chrom_assay <- CreateChromatinAssay(
+  counts       = peak.mat,
+  sep          = c(":", "-"),
+  ranges       = peak.ranges,
+  annotation   = annotation,   # optional but recommended
+  genome       = "mm10"        # or whichever genome build is appropriate
+)
+# Check the first few cell names in your Seurat object
+head(colnames(seurat.obj))
+
+# Check the first few cell names in the chrom_assay
+head(colnames(chrom_assay))
+# Example if the only difference is that ATAC uses '-1' while RNA uses '.1'
+colnames(chrom_assay) <- sub("-1$", ".1", colnames(chrom_assay))
+
+common_cells <- intersect(colnames(seurat.obj), colnames(chrom_assay))
+length(common_cells)
+# Add the ATAC assay to our Seurat object
+seurat.obj[["ATAC"]] <- chrom_assay
+
+
+# You can now switch between assays:
+# DefaultAssay(seurat.obj) <- "ATAC"  # for ATAC-related commands
+# DefaultAssay(seurat.obj) <- "RNA"   # for RNA-related commands
+
+##############################################
+# 6) (Optional) Preprocessing of the Chromatin data
+##############################################
+# You would typically run Signac QC, dimension reduction, etc. For instance:
+#
+# seurat.obj <- NucleosomeSignal(seurat.obj)
+# seurat.obj <- TSSEnrichment(seurat.obj)
+# seurat.obj <- RunTFIDF(seurat.obj)
+# seurat.obj <- FindTopFeatures(seurat.obj, min.cutoff = "q0")
+# seurat.obj <- RunSVD(seurat.obj)
+# seurat.obj <- RunUMAP(seurat.obj, reduction = 'lsi', dims = 2:30)
+
+##############################################
+# 7) Visualize accessibility at the promoter of Junb
+##############################################
+# CoveragePlot from Signac will display coverage tracks for each group (e.g., cell type).
+# Make sure 'celltype' is a column in your object@meta.data before proceeding.
+# If your metadata column is called differently, adjust group.by accordingly.
+
+# Set the ATAC assay as the default for coverage plotting
+DefaultAssay(seurat.obj) <- "ATAC"
+
+# Use the annotation stored in your chromatin assay
+annotation <- Annotation(seurat.obj[["ATAC"]])
+
+# Subset to just Junb
+junb.coords <- annotation[annotation$gene_name == "Junb"]
+
+# If multiple transcripts exist, pick one or merge them. 
+# For simplicity, let's take the first (or you could merge ranges).
+junb.range <- junb.coords[1]
+
+# Optionally extend upstream/downstream, e.g., for promoter region ±2 kb
+promoter.range <- Extend(
+  x         = junb.range,
+  upstream  = 2000,
+  downstream= 500
+)
+promoter.range
+
+all.peaks <- granges(seurat.obj[["ATAC"]])
+names(all.peaks) <- rownames(seurat.obj[["ATAC"]])
+overlapping.peaks <- subsetByOverlaps(x = all.peaks, ranges = promoter.range)
+
+# Get the names of those overlapping peaks
+peak.names <- names(overlapping.peaks)  
+peak.names
+
+atac.counts <- GetAssayData(seurat.obj[["ATAC"]], slot = "counts")
+region.counts <- atac.counts[peak.names, , drop = FALSE]
+
+region.accessibility <- Matrix::colSums(region.counts)
+seurat.obj$Junb_promoter_accessibility <- region.accessibility
+
+# For example, using VlnPlot by cell type:
+VlnPlot(
+  object   = seurat.obj,
+  features = "Junb_promoter_accessibility",
+  group.by = "cell_type"
+)
+
+# 1. Subset your Seurat object to keep only the cell types of interest
+celltypes_to_keep <- c("RG", "IP", "Cyc-IP", "Cyc", "CThPN", "CPN", "SCPN")
+subset_obj <- subset(
+  x     = seurat.obj, 
+  cells = WhichCells(seurat.obj, expression = cell_type %in% celltypes_to_keep)
+)
+
+# 2. Create a new column (e.g., "broad_celltype") to store the relabeled categories
+subset_obj$broad_celltype <- subset_obj$cell_type
+
+# 3. Relabel according to your grouping:
+#    RG => (RG, Cyc)
+#    IP => (IP, Cyc-IP)
+#    N  => (CPN, CThPN, SCPN)
+subset_obj$broad_celltype[subset_obj$broad_celltype %in% c("RG", "Cyc")] <- "RG"
+subset_obj$broad_celltype[subset_obj$broad_celltype %in% c("IP", "Cyc-IP")] <- "IP"
+subset_obj$broad_celltype[subset_obj$broad_celltype %in% c("CPN", "CThPN", "SCPN")] <- "N"
+
+# 4. Verify changes
+table(subset_obj$broad_celltype)
+
+
+# 1. Make broad_celltype a factor with the desired level order
+subset_obj$broad_celltype <- factor(
+  x      = subset_obj$broad_celltype,
+  levels = c("RG", "IP", "N")  # desired order
+)
+
+# 2. Now run VlnPlot, specifying group.by = "broad_celltype"
+VlnPlot(
+  object   = subset_obj,
+  features = c("Junb_promoter_accessibility"),  # replace with feature(s) of interest
+  group.by = "broad_celltype"
+) + NoLegend()
+
+
+
+sox2.coords <- annotation[annotation$gene_name == "Sox2"]
+
+# If multiple transcripts exist, pick one or merge them. 
+# For simplicity, let's take the first (or you could merge ranges).
+sox2.range <- sox2.coords[1]
+
+# Optionally extend upstream/downstream, e.g., for promoter region ±2 kb
+promoter.range <- Extend(
+  x         = sox2.range,
+  upstream  = 2000,
+  downstream= 500
+)
+promoter.range
+
+all.peaks <- granges(subset_obj[["ATAC"]])
+names(all.peaks) <- rownames(subset_obj[["ATAC"]])
+overlapping.peaks <- subsetByOverlaps(x = all.peaks, ranges = promoter.range)
+
+# Get the names of those overlapping peaks
+peak.names <- names(overlapping.peaks)  
+peak.names
+
+atac.counts <- GetAssayData(subset_obj[["ATAC"]], slot = "counts")
+region.counts <- atac.counts[peak.names, , drop = FALSE]
+
+region.accessibility <- Matrix::colSums(region.counts)
+subset_obj$Sox2_promoter_accessibility <- region.accessibility
+
+# 2. Now run VlnPlot, specifying group.by = "broad_celltype"
+VlnPlot(
+  object   = subset_obj,
+  features = c("Sox2_promoter_accessibility"),  # replace with feature(s) of interest
+  group.by = "broad_celltype"
+) + NoLegend()
+
+
+
+
+
+saveRDS(subset_obj, "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE241429_Mouse_Multiome_only_RGIPN.rds")
+
+########## HUMAN
+library(Seurat)
+library(Signac)
+library(GenomeInfoDb)
+library(GenomicRanges)
+library(Matrix)
+library(EnsDb.Hsapiens.v86)
+
+
+
+#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fcell%5Fmetadata.txt.gz
+meta.data <- read.table(
+  file      = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_multiome_cell_metadata.txt.gz",
+  header    = TRUE,
+  sep       = "\t",
+  row.names = 1
+)
+
+#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fcluster%5Fnames.txt.gz
+cluster.names <- read.table(
+  file      = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_multiome_cluster_names.txt.gz",
+  header    = TRUE,
+  sep       = "\t"
+)
+# Possibly merge these into your metadata if appropriate:
+# e.g., meta.data$cluster_name <- cluster.names[rownames(meta.data), "cluster_name_column"]
+
+#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Frna%5Fcounts.tsv.gz
+rna.counts <- read.delim(
+  file   = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_multiome_rna_counts.tsv.gz",
+  header = TRUE,
+  sep    = "\t",
+  row.names = 1
+)
+
+# If, for example, columns are cells and rows are genes, then you're good.
+# If it’s the opposite (cells in rows, genes in columns), transpose:
+# rna.counts <- t(rna.counts)
+
+# Create a Seurat object for the RNA assay
+seurat.obj <- CreateSeuratObject(
+  counts = rna.counts,
+  meta.data = meta.data,  # ensures the same cell names
+  assay = "RNA"
+)
+#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fatac%5Fconsensus%5Fpeaks.txt.gz
+peak.bed <- read.table(
+  file = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_multiome_atac_consensus_peaks.txt.gz",
+  header = TRUE,   # many BED files have no header
+  sep = "\t"
+)
+colnames(peak.bed)[1:3] <- c("chr", "start", "end")
+
+# Convert to GRanges
+peak.ranges <- makeGRangesFromDataFrame(
+  df = peak.bed,
+  seqnames.field = "chr",
+  start.field    = "start",
+  end.field      = "end",
+  keep.extra.columns = TRUE
+)
+
+#https://ftp.ncbi.nlm.nih.gov/geo/series/GSE162nnn/GSE162170/suppl/GSE162170%5Fmultiome%5Fatac%5Fcounts.tsv.gz
+atac.counts <- read.delim(
+  file   = "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_multiome_atac_counts.tsv",
+  header = FALSE,
+  sep    = "\t"
+)
+# If columns are cells and rows are peaks, this is fine.
+# If the file is transposed, do: atac.counts <- t(atac.counts)
+
+# Convert to a sparse matrix for efficiency, if you want:
+atac.counts <- as(as.matrix(atac.counts), "dgCMatrix")
+colnames(atac.counts) <- rownames(meta.data)
+# Make sure colnames of atac.counts match colnames(seurat.obj)
+common.cells <- intersect(colnames(seurat.obj), colnames(atac.counts))
+length(common.cells)
+
+# (Optional) Get annotation (adjust based on human vs. mouse)
+# Example for mouse:
+# library(EnsDb.Mmusculus.v79)
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+annotation$genebiotype <- annotation$gene_biotype
+
+chrom_assay <- CreateChromatinAssay(
+  counts       = atac.counts,
+  sep          = c(":", "-"),     # or how you name your peaks, if rownames are 'chrX:start-end'
+  ranges       = peak.ranges,
+  annotation   = annotation, 
+  genome       = "hg38"           # or "hg38" if human
+)
+
+# Add this to the Seurat object
+seurat.obj[["ATAC"]] <- chrom_assay
+
+
+metadata_df <- read.csv("/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/celltypes.csv", header = TRUE)
+
+# Show the first few rows
+head(metadata_df)
+
+
+common_cells <- intersect(colnames(seurat.obj), metadata_df$cell)
+
+# Now subset the Seurat object to keep only these cells:
+seurat.obj <- subset(seurat.obj, cells = common_cells)
+
+# ---------------------
+# 4. Add a 'celltype' column to Seurat's metadata
+# ---------------------
+# We will create a named vector for celltype, where names = cell barcodes
+celltype_vec <- metadata_df$celltype
+names(celltype_vec) <- metadata_df$cell
+
+# Now assign it to our Seurat object's metadata
+# so each cell gets the corresponding celltype
+seurat.obj$celltype <- celltype_vec[colnames(seurat.obj)]
+
+# Verify
+table(seurat.obj$celltype)
+head(seurat.obj@meta.data)
+
+# Switch to ATAC assay if needed
+DefaultAssay(seurat.obj) <- "ATAC"
+
+# If using mouse and annotation includes "Junb"
+gene.coords <- Annotation(seurat.obj[["ATAC"]])
+junb.range  <- gene.coords[gene.coords$gene_name == "JUNB"][1]
+
+# Extend around TSS
+promoter.range <- Extend(
+  x         = junb.range,
+  upstream  = 2000,
+  downstream= 500
+)
+
+# Identify which peaks overlap this region
+all.peaks <- granges(seurat.obj[["ATAC"]])
+# Assign row names to the GRanges
+names(all.peaks) <- rownames(seurat.obj[["ATAC"]])
+
+overlapping.peaks <- subsetByOverlaps(x = all.peaks, ranges = promoter.range)
+peak.names <- names(overlapping.peaks)
+
+# Extract counts, sum them
+atac.mat   <- GetAssayData(seurat.obj[["ATAC"]], slot = "counts")
+region.counts <- atac.mat[peak.names, , drop = FALSE]
+
+region.accessibility <- Matrix::colSums(region.counts)
+seurat.obj$Sox2_promoter_accessibility <- region.accessibility
+
+
+# 1. Make broad_celltype a factor with the desired level order
+seurat.obj$celltype <- factor(
+  x      = seurat.obj$celltype,
+  levels = c("RG", "IP", "N")  # desired order
+)
+
+
+VlnPlot(
+  object   = seurat.obj,
+  features = "JUNB_promoter_accessibility",
+  group.by = "celltype"
+)
+
+
+gene.coords <- Annotation(seurat.obj[["ATAC"]])
+sox2.range  <- gene.coords[gene.coords$gene_name == "SOX2"][1]
+
+# Extend around TSS
+promoter.range <- Extend(
+  x         = sox2.range,
+  upstream  = 2000,
+  downstream= 500
+)
+
+# Identify which peaks overlap this region
+all.peaks <- granges(seurat.obj[["ATAC"]])
+# Assign row names to the GRanges
+names(all.peaks) <- rownames(seurat.obj[["ATAC"]])
+
+overlapping.peaks <- subsetByOverlaps(x = all.peaks, ranges = promoter.range)
+peak.names <- names(overlapping.peaks)
+
+# Extract counts, sum them
+atac.mat   <- GetAssayData(seurat.obj[["ATAC"]], slot = "counts")
+region.counts <- atac.mat[peak.names, , drop = FALSE]
+
+region.accessibility <- Matrix::colSums(region.counts)
+seurat.obj$Sox2_promoter_accessibility <- region.accessibility
+
+
+# 1. Make broad_celltype a factor with the desired level order
+seurat.obj$celltype <- factor(
+  x      = seurat.obj$celltype,
+  levels = c("RG", "IP", "N")  # desired order
+)
+
+
+VlnPlot(
+  object   = seurat.obj,
+  features = "Sox2_promoter_accessibility",
+  group.by = "celltype"
+)
+
+
+saveRDS(seurat.obj, "/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/GSE162170_Human_Multiome_only_RGIPN.rds")
+
+
