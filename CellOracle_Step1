@@ -769,6 +769,18 @@ adata.write_h5ad("Final_celloracle_v2.h5ad")
 adata = sc.read_h5ad("Final_celloracle_v2.h5ad")
 
 
+# export the celltype annotation and cell names as csv for R, which can used for annotated the ATAC counts
+df = adata.obs[['celltype']].copy()
+
+# 3. Move the index (which holds cell barcodes) into a column
+df.reset_index(inplace=True)  # Now df has a column "index" containing the cell names
+
+# 4. Rename the columns to "cell" and "celltype" for clarity
+df.columns = ['cell', 'celltype']
+
+# 5. Write to CSV
+df.to_csv("/Users/javed/Documents/Human_multiome/Mouse_human_promoter_accessibility/celltypes.csv", index=False)
+
 
 print(f"Cell number is :{adata.shape[0]}")
 print(f"Gene number is :{adata.shape[1]}")
