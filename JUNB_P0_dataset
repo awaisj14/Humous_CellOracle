@@ -1367,6 +1367,97 @@ ggplot(clone_summary, aes(x = cloneSize, fill = stage)) +
 
 
 
+#Alternative - merged neurons
+
+
+# Modify meta to merge cell types
+meta <- pbmc_filtered@meta.data %>%
+  mutate(
+    predicted.id = ifelse(predicted.id %in% c('UL CPN', 'Migrating neurons'), 'Neurons', predicted.id)
+  )
+
+# Step 1: Calculate clone sizes for each stage and predicted.id
+clone_summary <- meta %>%
+  dplyr::group_by(cloneID, stage, predicted.id) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop')
+
+# Verify clone summary
+print(clone_summary)
+
+# Step 2: Plot the clone size distribution by stage and predicted.id
+ggplot(clone_summary, aes(x = cloneSize, fill = stage)) +
+  geom_histogram(binwidth = 1, position = "dodge", alpha = 0.7) +
+  facet_wrap(~ predicted.id, scales = "free_y") +
+  theme_bw() +
+  labs(
+    title = "Histogram of Clone Sizes by Predicted ID and Stage",
+    x = "Clone Size",
+    y = "Frequency"
+  ) +
+  scale_fill_manual(values = c("Control_E15_P0" = "skyblue", "Junb_E15_P0" = "salmon")) +
+  theme(legend.position = "bottom")
+
+
+
+#Piechart
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Modify meta to merge cell types
+meta <- pbmc_filtered@meta.data %>%
+  mutate(
+    predicted.id = ifelse(predicted.id %in% c('UL CPN', 'Migrating neurons'), 'Neurons', predicted.id)
+  )
+
+# Step 1: Calculate clone sizes for each stage and predicted.id
+clone_summary <- meta %>%
+  dplyr::group_by(cloneID, stage, predicted.id) %>%
+  dplyr::summarise(cloneSize = n(), .groups = 'drop')
+
+# Step 2: Categorize clone sizes into 3 groups
+clone_summary <- clone_summary %>%
+  mutate(
+    cloneCategory = case_when(
+      cloneSize == 1 ~ "1",
+      cloneSize == 2 ~ "2",
+      cloneSize > 2 ~ ">3"
+    )
+  )
+
+# Step 3: Summarize counts per (predicted.id, stage, cloneCategory)
+clone_distribution <- clone_summary %>%
+  dplyr::group_by(predicted.id, stage, cloneCategory) %>%
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+# Step 4: Ensure all (predicted.id, stage) groups have all cloneCategories
+clone_distribution <- clone_distribution %>%
+  tidyr::complete(predicted.id, stage, cloneCategory, fill = list(count = 0))
+
+# Step 5: Calculate proportions per (predicted.id, stage)
+clone_distribution <- clone_distribution %>%
+  dplyr::group_by(predicted.id, stage) %>%
+  dplyr::mutate(proportion = count / sum(count)) %>%
+  dplyr::ungroup()
+
+# Step 6: Generate the pie chart based on proportions
+ggplot(clone_distribution, aes(x = "", y = proportion, fill = cloneCategory)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y", start = 0) +  # Ensure full pie
+  facet_wrap(~ predicted.id + stage) +
+  theme_void() +
+  labs(
+    title = "Proportional Clone Size Distribution by Predicted ID and Stage",
+    fill = "Clone Size"
+  ) +
+  scale_fill_manual(values = c("1" = "skyblue", "2" = "salmon", ">3" = "lightgreen")) +
+  theme(legend.position = "bottom")
+
+
+
+
+
+
 saveRDS(pbmc_filtered, "/Users/javed/Documents/JUNB_P0/merged_balanced.rds")
 
 
