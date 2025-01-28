@@ -1398,6 +1398,103 @@ ggplot(clone_summary, aes(x = cloneSize, fill = stage)) +
   theme(legend.position = "bottom")
 
 
+#STATS CHISQUARED
+# We assume you've already loaded dplyr, etc., and created `clone_summary`.
+# Step 1: Filter for Neurons only
+neuron_clone_summary <- clone_summary %>%
+  dplyr::filter(predicted.id == "Neurons")
+
+# Step 2: Create a contingency table of cloneSize by stage
+freq_table <- table(neuron_clone_summary$cloneSize, neuron_clone_summary$stage)
+print(freq_table)
+
+# Step 3: Run a Chi-squared test on this contingency table
+chi_result <- chisq.test(freq_table)
+print(chi_result)
+
+# Check if p-value < 0.05
+if (chi_result$p.value < 0.05) {
+  cat("Significant (p < 0.05) *\n")
+} else {
+  cat("Not significant (p >= 0.05)\n")
+}
+
+# Step 4 (Optional): Inspect residuals or expected counts
+chi_result$expected  # expected counts under null hypothesis
+chi_result$residuals # Pearson residuals
+
+#STATS FISHER TEST
+
+
+library(dplyr)
+library(ggplot2)
+
+# (We assume `clone_summary` is already created, as in your script above)
+# Step 1: Filter only Neurons
+neuron_clone_summary <- clone_summary %>%
+  dplyr::filter(predicted.id == "Neurons")
+
+# Step 2: Count how many clones fall in each cloneSize for each stage
+data_by_size <- neuron_clone_summary %>%
+  dplyr::group_by(cloneSize, stage) %>%
+  dplyr::summarize(freq = n(), .groups = "drop")
+
+# Inspect
+print(data_by_size)
+
+# First, compute total number of neurons for each stage
+total_control <- sum(data_by_size$freq[data_by_size$stage == "Control_E15_P0"])
+total_junb    <- sum(data_by_size$freq[data_by_size$stage == "Junb_E15_P0"])
+
+# A helper function to run the 2×2 test for a given row
+fisher_per_size <- function(freq_control_size, freq_junb_size,
+                            total_control, total_junb) {
+  # 2×2 table:
+  #       Control  Junb
+  # Size:     A       B
+  # Not:      C       D
+  
+  A <- freq_control_size
+  B <- freq_junb_size
+  C <- total_control - A
+  D <- total_junb    - B
+  
+  mat <- matrix(c(A, C, B, D), nrow = 2, byrow = TRUE)
+  ft <- fisher.test(mat)
+  return(ft$p.value)
+}
+
+# Apply the function per cloneSize
+library(tidyr)
+
+# Spread data_by_size so we can easily pick "Control" vs. "Junb" frequencies
+data_wide <- data_by_size %>%
+  pivot_wider(
+    names_from = stage,
+    values_from = freq,
+    values_fill = 0
+  ) %>%
+  # Create a new column for p-value per cloneSize
+  rowwise() %>%
+  mutate(
+    pval = fisher_per_size(
+      freq_control_size = `Control_E15_P0`,
+      freq_junb_size    = `Junb_E15_P0`,
+      total_control     = total_control,
+      total_junb        = total_junb
+    )
+  ) %>%
+  ungroup()
+
+# Inspect
+print(data_wide)
+
+
+data_wide <- data_wide %>%
+  mutate(sig_label = ifelse(pval < 0.05, "*", ""))
+write.csv(data_wide, "/Users/javed/Documents/JUNB_P0/Clonal_analysis/fisher_test.csv")
+
+
 
 #Piechart
 library(dplyr)
