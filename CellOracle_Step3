@@ -10,8 +10,13 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib as mpl
 import scanpy as sc
 import celloracle as co
+
+# Make PDF text editable in Illustrator
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype'] = 42
 
 # Parameters (easy to change)
 goi = "JUNB"              # Gene of interest
@@ -59,11 +64,11 @@ def get_custom_color(angle):
     """
     if -3 * np.pi / 4 <= angle < -np.pi / 4:  # South
         return "#C7C067"
-    elif -np.pi / 4 <= angle < np.pi / 4:  # East
+    elif -np.pi / 4 <= angle < np.pi / 4:     # East
         return "#DE3B89"
     elif np.pi / 4 <= angle < 3 * np.pi / 4:  # North
         return "#61C6AD"
-    else:  # West
+    else:                                     # West
         return "#CEA2CE"
 
 # Convert hex colors to RGB
@@ -90,7 +95,8 @@ if hasattr(oracle, "delta_embedding"):
         # Plot scaled cell positions and arrows
         fig_fa, ax_fa = plt.subplots(figsize=(6, 6))
         ax_fa.scatter(X_coords, Y_coords, s=5, color="lightgray", alpha=0.7, label="Cells")
-        ax_fa.quiver(X_filtered, Y_filtered, U_filtered, V_filtered, color=arrow_colors, pivot="tail", angles="xy", scale_units="xy", scale=1)
+        ax_fa.quiver(X_filtered, Y_filtered, U_filtered, V_filtered, color=arrow_colors,
+                     pivot="tail", angles="xy", scale_units="xy", scale=1)
         ax_fa.set_title(f"Simulated shift vectors: {goi} {perturbation_type}")
         ax_fa.set_xlabel("FA embedding 1")
         ax_fa.set_ylabel("FA embedding 2")
@@ -123,5 +129,39 @@ if hasattr(oracle, "delta_embedding"):
         ax_legend.set_title("Direction Legend")
         plt.savefig(os.path.join(save_folder, f"direction_legend_{goi}_{perturbation_type}.pdf"))
         plt.close(fig_legend)
+
+        # -------------------
+        # Plot a pie chart of the proportions of cells in each color category
+        # -------------------
+        direction_label = {
+            "#C7C067": "South",
+            "#DE3B89": "East",
+            "#61C6AD": "North",
+            "#CEA2CE": "West"
+        }
+
+        color_counts = {c: 0 for c in direction_label.keys()}
+
+        for c in arrow_colors:
+            color_counts[c] += 1
+
+        labels = [direction_label[c] for c in color_counts.keys()]
+        sizes = list(color_counts.values())
+        pie_colors = list(color_counts.keys())
+
+        fig_pie, ax_pie = plt.subplots(figsize=(5, 5))
+        ax_pie.pie(
+            sizes,
+            labels=labels,
+            colors=pie_colors,
+            autopct="%1.1f%%",
+            startangle=140,
+            textprops={"fontsize": 8},
+        )
+        ax_pie.set_title("Proportion of Cells by Direction", fontsize=10)
+        plt.savefig(os.path.join(save_folder, f"pie_chart_{goi}_{perturbation_type}.pdf"))
+        plt.close(fig_pie)
+    else:
+        print("No cells exceed the magnitude threshold for shift.")
 else:
     print("No delta_embedding attribute found. Please check the version of celloracle or documentation.")
