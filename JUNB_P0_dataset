@@ -1234,36 +1234,97 @@ saveRDS(pbmc, "/Users/javed/Documents/JUNB_P0/Final_merged.rds")
 
 
 ############ UPSET PLOT ##############
+
+# Load required libraries
 library(dplyr)
 library(tidyr)
-library(ggplot2)
-library(ComplexUpset)
+library(UpSetR)
 
+# Assuming pbmc@meta.data is already loaded and available in your environment
+metadata <- pbmc@meta.data
 
-# Assuming 'clone_summary' is your filtered and balanced data frame
-# clone_summary contains: cloneID, stage, predicted.id, cloneSize
+# Define the groups to compare
+target_groups <- c("Control_E15_P0", "Junb_E15_P0")
 
-# Step 1: Create a binary matrix indicating presence of each predicted.id in each clone
-clone_predicted_matrix <- clone_summary %>%
-  select(cloneID, predicted.id, stage) %>%
-  distinct() %>%  # Ensure each clone-predicted.id pair is unique
-  mutate(present = 1) %>%
-  pivot_wider(names_from = predicted.id, values_from = present, values_fill = list(present = 0))
+# Filter metadata for the target groups
+data_subset <- metadata %>%
+  filter(orig.ident %in% target_groups) %>%
+  select(orig.ident, cloneID, predicted.id) %>%
+  filter(!is.na(cloneID) & !is.na(predicted.id))
 
-# View the first few rows of the binary matrix
-head(clone_predicted_matrix)
+# Merge "Migrating neurons" and "UL CPN" into "Neurons"
+data_subset <- data_subset %>%
+  mutate(
+    predicted.id = ifelse(predicted.id %in% c("Migrating neurons", "UL CPN"), 
+                          "Neurons", 
+                          predicted.id)
+  )
 
+# Check that both target groups are present
+if (!all(target_groups %in% unique(data_subset$orig.ident))) {
+  stop("One or more of the target groups are missing in the data.")
+}
 
+# Get a consistent order of predicted.id values (including the new merged 'Neurons')
+predicted_id_order <- unique(data_subset$predicted.id)
 
-# Basic UpSet plot
-upset(
-  clone_predicted_matrix,
-  intersect = colnames(clone_predicted_matrix)[-1],  # Exclude cloneID
-  name = "Predicted IDs",
-  width_ratio = 0.1,
-  min_size = 1
-) +
-  ggtitle("UpSet Plot of Clone Sharing Among Predicted IDs")
+# Create a combined presence/absence matrix for intersections
+create_combined_presence_matrix <- function(data, ordered_ids) {
+  combined_matrix <- data %>%
+    distinct(orig.ident, cloneID, predicted.id) %>%
+    mutate(present = 1) %>%
+    pivot_wider(
+      names_from = c(predicted.id, orig.ident),  # Combine predicted.id and orig.ident in column names
+      values_from = present,
+      values_fill = list(present = 0)
+    ) %>%
+    as.data.frame()
+  
+  # Set row names to cloneID
+  rownames(combined_matrix) <- combined_matrix$cloneID
+  combined_matrix$cloneID <- NULL
+  
+  # Reorder columns based on predicted.id order
+  ordered_columns <- unlist(lapply(ordered_ids, function(x) {
+    c(paste0(x, "_Control_E15_P0"), paste0(x, "_Junb_E15_P0"))
+  }))
+  # Only keep columns that exist (some predicted.id might not appear in both groups)
+  ordered_columns <- intersect(ordered_columns, colnames(combined_matrix))
+  combined_matrix <- combined_matrix[, ordered_columns]
+  
+  return(combined_matrix)
+}
+
+# Generate the combined presence/absence matrix
+presence_matrix_combined <- create_combined_presence_matrix(data_subset, predicted_id_order)
+
+# Define the file path for the PDF
+output_pdf <- "UpSet_Plot_Grouped_Intersections.pdf"
+
+# Open the PDF device
+pdf(output_pdf, width = 12, height = 10)
+
+# Generate the UpSet plot
+UpSetR::upset(
+  data = presence_matrix_combined,
+  sets = colnames(presence_matrix_combined),
+  keep.order = TRUE,
+  order.by = "freq",
+  main.bar.color = "steelblue",
+  sets.bar.color = "gray",
+  matrix.color = "black",
+  mainbar.y.label = "Intersection Size (Grouped by Predicted.id)",
+  sets.x.label = "Set Size",
+  text.scale = c(1.5, 1.5, 1, 1, 1.5, 1.5),
+  mb.ratio = c(0.6, 0.4),
+  empty.intersections = "on"
+)
+
+# Close the PDF device
+dev.off()
+
+# Notify the user
+cat("Grouped UpSet plot (with 'Neurons' merged) saved as:", output_pdf, "\n")
 
 
 
