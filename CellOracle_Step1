@@ -646,6 +646,19 @@ adata.write_h5ad("Trevino_Final_reannotated_phase_celloracle_3000_redone_v3.h5ad
 adata = sc.read_h5ad("Trevino_Final_reannotated_phase_celloracle_3000_redone_v3.h5ad")
 
 
+# 1. Extract gene names
+genes = adata.var_names.tolist()
+
+# 2. Write to a text file
+output_path = "genes_list.txt"
+with open(output_path, "w") as txtfile:
+    for g in genes:
+        txtfile.write(g + "\n")
+
+print(f"Wrote {len(genes)} genes to {output_path}")
+
+
+
 import copy
 import glob
 import time
