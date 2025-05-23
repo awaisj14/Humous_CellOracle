@@ -700,7 +700,7 @@ def draw_chord_diagram(adjacency, nodes, node_coef_mean, tfs, title, output_file
             showarrow=False,
             font=dict(size=10)
         )
-u    
+   
     # 3.8 Save the figure (requires kaleido or orca for static PDF)
     fig.write_image(output_file, format="pdf")
     print(f"Chord diagram saved as {output_file}")
